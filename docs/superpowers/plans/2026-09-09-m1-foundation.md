@@ -2253,6 +2253,17 @@ class MeldDetail(MeldOut):
     story: StoryOut | None
 ```
 
+**`MeldOut` deliberately has no `story` field, and must not gain one.** Only
+`get_meld` eager-loads the relationship (`selectinload(Meld.story)`);
+`list_melds` and `create_meld` return Melds whose `story` is unloaded. Reading
+an unloaded relationship under asyncio raises `MissingGreenlet`, so adding
+`story` to `MeldOut` would break `GET /melds` and `POST /melds` immediately —
+and only at runtime, since Pydantic cannot see the difference. `MeldDetail` is
+the one model that exposes it, and it is used by exactly one route, the one
+whose service call eager-loads. If a future endpoint needs the story, give it
+`MeldDetail` and a service call that eager-loads, rather than widening
+`MeldOut`.
+
 - [ ] **Step 4: Write the router**
 
 Create `services/backend/src/framemeld/melds/router.py`:
