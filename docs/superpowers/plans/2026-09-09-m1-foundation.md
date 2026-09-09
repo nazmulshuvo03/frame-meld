@@ -20,7 +20,23 @@ Every task's requirements implicitly include these. Values are copied verbatim f
 - **Nothing is destroyed by an edit.** Deletes are soft (`deleted_at`), never `DELETE FROM`. (Spec §4.4.)
 - **Every generated row carries `input_hash`, `state`, `provider`, `model`, `params`, `credits_spent`, `asset_id`.** (Spec §4.1.) M1 creates no generated rows, but `stories.input_hash` exists from the start and uses the same canonical hashing function.
 - **`input_hash` is the SHA-256 of the canonical JSON of everything that produced the artifact.** (Spec §4.1.) One shared implementation, never re-derived per call site.
-- **Enum columns use `sa.Enum(..., native_enum=False)`** — a VARCHAR plus a CHECK constraint, not a Postgres native enum. Native enums require `ALTER TYPE` migrations, and `melds.stage` gains values in every later milestone.
+- **Enum columns are VARCHAR plus a named CHECK constraint, never a Postgres native enum.** Native enums need `ALTER TYPE` migrations, and `melds.stage` gains values in every later milestone. **Four arguments are required together** — `native_enum=False` alone is not enough:
+
+  ```python
+  Enum(
+      MeldStage,
+      native_enum=False,          # VARCHAR, not a native enum type
+      length=20,
+      create_constraint=True,     # REQUIRED: SQLAlchemy 2.0 defaults this False,
+                                  # so native_enum=False alone gives a bare,
+                                  # completely unconstrained VARCHAR
+      name="meld_stage",          # names the CHECK so a migration can alter it
+      values_callable=lambda e: [m.value for m in e],
+                                  # store 'story', not the member name 'STORY'
+  )
+  ```
+
+  Omitting `create_constraint=True` yields a column with no validation whatsoever. Omitting `values_callable` stores the uppercase member name, so the database disagrees with both the API and the values the spec lists. Verified against the installed SQLAlchemy 2.0.52.
 - **All Meld data is user-scoped.** Every query filters on `user_id`. A request for another user's Meld returns 404, never 403 — do not leak existence.
 - **Money is not in M1.** No credit ledger, no pricing table. Those arrive in M3.
 
@@ -1601,6 +1617,34 @@ class ModerationState(enum.StrEnum):
     FLAGGED = "flagged"
 
 
+def _enum_column(enum_cls: type[enum.StrEnum], constraint_name: str) -> Enum:
+    """A VARCHAR column with a named CHECK constraint over the enum's *values*.
+
+    All four arguments are load-bearing and each fails silently if omitted:
+
+    - `native_enum=False` avoids a Postgres native enum, which would need an
+      `ALTER TYPE` migration every time a member is added.
+    - `create_constraint=True` is required. SQLAlchemy 2.0 defaults it to
+      False, so `native_enum=False` on its own produces a bare, completely
+      unconstrained VARCHAR — no validation at any layer.
+    - `name` names the CHECK so a later migration can drop and recreate it.
+    - `values_callable` stores `'story'` rather than the member name
+      `'STORY'`, keeping the database consistent with the API and with the
+      values listed in the spec.
+
+    Later milestones add enums in other model files; move this to a shared
+    module at that point rather than copying it.
+    """
+    return Enum(
+        enum_cls,
+        native_enum=False,
+        length=20,
+        create_constraint=True,
+        name=constraint_name,
+        values_callable=lambda e: [member.value for member in e],
+    )
+
+
 class Meld(Base):
     __tablename__ = "melds"
 
@@ -1612,17 +1656,16 @@ class Meld(Base):
     )
     title: Mapped[str] = mapped_column(String(200))
 
-    # native_enum=False renders these as VARCHAR + CHECK. MeldStage gains a
-    # member in most later milestones, and ALTER TYPE migrations on a native
-    # Postgres enum are painful.
+    # See _enum_column above for why all four Enum arguments are required.
     stage: Mapped[MeldStage] = mapped_column(
-        Enum(MeldStage, native_enum=False, length=20), default=MeldStage.STORY
+        _enum_column(MeldStage, "meld_stage"), default=MeldStage.STORY
     )
     status: Mapped[MeldStatus] = mapped_column(
-        Enum(MeldStatus, native_enum=False, length=20), default=MeldStatus.DRAFT
+        _enum_column(MeldStatus, "meld_status"), default=MeldStatus.DRAFT
     )
     moderation_state: Mapped[ModerationState] = mapped_column(
-        Enum(ModerationState, native_enum=False, length=20), default=ModerationState.PENDING
+        _enum_column(ModerationState, "meld_moderation_state"),
+        default=ModerationState.PENDING,
     )
 
     aspect_ratio: Mapped[str] = mapped_column(String(10), default="16:9")
