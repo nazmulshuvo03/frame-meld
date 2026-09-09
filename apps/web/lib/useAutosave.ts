@@ -13,6 +13,13 @@ export function useAutosave<T>({
   value: T;
   onSave: (value: T) => Promise<void>;
   delayMs?: number;
+  // Expected to be monotonic (e.g. flips false -> true once, when the real
+  // value becomes available, and never back). A caller that toggles it
+  // back and forth — tab visibility, an online/offline flag — will hit a
+  // path that never settles: the false transition runs this effect's
+  // cleanup and then bails before any status update. Not reachable from
+  // this app's own caller, but the hook is generic, so the next caller
+  // should know.
   enabled?: boolean;
 }): { status: SaveStatus } {
   const [status, setStatus] = useState<SaveStatus>("idle");
@@ -27,18 +34,43 @@ export function useAutosave<T>({
   // save is still current.
   const latestRef = useRef<T>(value);
 
+  // A completed save that turns out to be stale (see the timer callback's
+  // else branch below) bumps this to make the main effect re-evaluate,
+  // since neither `value` nor `onSave` necessarily changed.
+  const [saveTick, setSaveTick] = useState(0);
+
+  // Kept in a ref so the unmount flush below — which must not re-run on
+  // every onSave identity change — always calls the current one.
+  const onSaveRef = useRef(onSave);
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
+
+  // Flush on unmount. A client-side navigation does not fire beforeunload,
+  // and the debounce cleanup would otherwise discard text typed within the
+  // last delayMs without a trace. Deliberately fire-and-forget: the request
+  // outlives the component on a client transition, and there is no UI left
+  // to report a failure to.
+  useEffect(() => {
+    return () => {
+      if (latestRef.current !== savedRef.current) {
+        void onSaveRef.current(latestRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     // Nothing to compare against until the caller says the value is real.
-    // Without this the first run captures a placeholder — the empty string
-    // a page holds before its fetch resolves — and the real text arriving
-    // one render later looks like a user edit, saving it straight back and
-    // bumping the Meld's updated_at.
+    // Without this the first run captures whatever placeholder the caller
+    // held before its real value became available, and that real value
+    // arriving one render later looks like a user edit — saving it
+    // straight back for no reason.
     if (!enabled) return;
 
     latestRef.current = value;
 
-    // Skip the initial mount: the value just came from the server, so
-    // saving it back immediately would be a pointless write.
+    // Skip the initial run: this value just became available, so saving
+    // it back immediately would be a pointless write.
     if (firstRunRef.current) {
       firstRunRef.current = false;
       savedRef.current = value;
@@ -46,9 +78,9 @@ export function useAutosave<T>({
     }
 
     if (value === savedRef.current) {
-      // The text matches what the server has — the user undid their edit.
-      // Report it as saved rather than leaving a stale "unsaved", which
-      // would nag on close for work that is not actually pending.
+      // The value matches what was last confirmed — the user undid their
+      // edit. Report it as saved rather than leaving a stale "unsaved",
+      // which would nag on close for work that is not actually pending.
       setStatus((current) => (current === "idle" ? "idle" : "saved"));
       return;
     }
@@ -61,12 +93,20 @@ export function useAutosave<T>({
       try {
         await onSave(attempted);
         savedRef.current = attempted;
-        // Only claim "saved" if this is still the newest text. If the user
-        // typed while the request was in flight, a pending timer will save
-        // the newer value; saying "saved" here would tell them their latest
-        // work is safe when it is not.
+        // Only claim "saved" if this is still the newest value. If the
+        // user changed it while the request was in flight, a pending timer
+        // will save the newer value; saying "saved" here would tell them
+        // their latest work is safe when it is not.
         if (attempted === latestRef.current) {
           setStatus("saved");
+        } else {
+          // The value changed while this request was in flight, and the
+          // effect will not re-run on its own — value may now equal a
+          // value it has already seen (e.g. reverted to what savedRef used
+          // to hold). Nudge it, so the current value gets saved instead of
+          // sitting on screen while the server holds something else and
+          // the status reads "saved".
+          setSaveTick((tick) => tick + 1);
         }
       } catch {
         setStatus("error");
@@ -76,7 +116,7 @@ export function useAutosave<T>({
     // Every keystroke clears the pending timer, so only the last one in a
     // burst actually fires.
     return () => clearTimeout(timer);
-  }, [value, onSave, delayMs, enabled]);
+  }, [value, onSave, delayMs, enabled, saveTick]);
 
   // Warn on close while anything is unsaved, in flight, or failed.
   useEffect(() => {
