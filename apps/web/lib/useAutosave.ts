@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type SaveStatus = "idle" | "unsaved" | "saving" | "saved" | "error";
 
@@ -46,18 +46,33 @@ export function useAutosave<T>({
     onSaveRef.current = onSave;
   }, [onSave]);
 
+  // Every save — debounced or flushed on unmount — goes through this chain,
+  // so at most one request is in flight and they apply in issue order.
+  // Without it an unmount flush can race a still-pending debounced save and
+  // the server lands on whichever request happens to arrive last, which may
+  // be the older text.
+  const queueRef = useRef<Promise<unknown>>(Promise.resolve());
+
+  const enqueueSave = useCallback((next: T) => {
+    const run = () => onSaveRef.current(next);
+    // Chained on both settle paths so one failed save cannot stall the queue.
+    queueRef.current = queueRef.current.then(run, run);
+    return queueRef.current;
+  }, []);
+
   // Flush on unmount. A client-side navigation does not fire beforeunload,
   // and the debounce cleanup would otherwise discard text typed within the
-  // last delayMs without a trace. Deliberately fire-and-forget: the request
-  // outlives the component on a client transition, and there is no UI left
-  // to report a failure to.
+  // last delayMs without a trace.
   useEffect(() => {
     return () => {
       if (latestRef.current !== savedRef.current) {
-        void onSaveRef.current(latestRef.current);
+        // Queued rather than fired directly, so it lands after any save
+        // already in flight instead of racing it. The catch only suppresses
+        // an unhandled rejection — there is no UI left to report to.
+        void enqueueSave(latestRef.current).catch(() => {});
       }
     };
-  }, []);
+  }, [enqueueSave]);
 
   useEffect(() => {
     // Nothing to compare against until the caller says the value is real.
@@ -91,7 +106,7 @@ export function useAutosave<T>({
       const attempted = value;
       setStatus("saving");
       try {
-        await onSave(attempted);
+        await enqueueSave(attempted);
         savedRef.current = attempted;
         // Only claim "saved" if this is still the newest value. If the
         // user changed it while the request was in flight, a pending timer
@@ -116,7 +131,7 @@ export function useAutosave<T>({
     // Every keystroke clears the pending timer, so only the last one in a
     // burst actually fires.
     return () => clearTimeout(timer);
-  }, [value, onSave, delayMs, enabled, saveTick]);
+  }, [value, onSave, delayMs, enabled, saveTick, enqueueSave]);
 
   // Warn on close while anything is unsaved, in flight, or failed.
   useEffect(() => {
