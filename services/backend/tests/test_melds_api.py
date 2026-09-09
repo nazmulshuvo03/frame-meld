@@ -53,15 +53,32 @@ async def test_get_meld_returns_404_for_an_unknown_id(logged_in):
 async def test_get_meld_returns_404_for_another_users_meld(client):
     """404 rather than 403 — the response must not confirm that the Meld
     exists at all."""
-    await client.post("/auth/signup", json={"email": "alice@example.com", "password": "hunter2hunter2"})
-    await client.post("/auth/login", json={"email": "alice@example.com", "password": "hunter2hunter2"})
-    created = (await client.post("/melds", json={"title": "Alice's"})).json()
-    await client.post("/auth/logout")
+    alice_signup = await client.post(
+        "/auth/signup", json={"email": "alice@example.com", "password": "hunter2hunter2"}
+    )
+    assert alice_signup.status_code == 201, alice_signup.text
+    alice_login = await client.post(
+        "/auth/login", json={"email": "alice@example.com", "password": "hunter2hunter2"}
+    )
+    assert alice_login.status_code == 200, alice_login.text
 
-    await client.post("/auth/signup", json={"email": "bob@example.com", "password": "hunter2hunter2"})
-    await client.post("/auth/login", json={"email": "bob@example.com", "password": "hunter2hunter2"})
+    created = await client.post("/melds", json={"title": "Alice's"})
+    assert created.status_code == 201, created.text
+    meld_id = created.json()["id"]
 
-    response = await client.get(f"/melds/{created['id']}")
+    logout = await client.post("/auth/logout")
+    assert logout.status_code == 204, logout.text
+
+    bob_signup = await client.post(
+        "/auth/signup", json={"email": "bob@example.com", "password": "hunter2hunter2"}
+    )
+    assert bob_signup.status_code == 201, bob_signup.text
+    bob_login = await client.post(
+        "/auth/login", json={"email": "bob@example.com", "password": "hunter2hunter2"}
+    )
+    assert bob_login.status_code == 200, bob_login.text
+
+    response = await client.get(f"/melds/{meld_id}")
     assert response.status_code == 404
 
 
@@ -124,13 +141,30 @@ async def test_save_story_accepts_an_empty_string(logged_in):
 
 
 async def test_save_story_returns_404_for_another_users_meld(client):
-    await client.post("/auth/signup", json={"email": "alice5@example.com", "password": "hunter2hunter2"})
-    await client.post("/auth/login", json={"email": "alice5@example.com", "password": "hunter2hunter2"})
-    created = (await client.post("/melds", json={"title": "Alice's"})).json()
-    await client.post("/auth/logout")
+    alice_signup = await client.post(
+        "/auth/signup", json={"email": "alice5@example.com", "password": "hunter2hunter2"}
+    )
+    assert alice_signup.status_code == 201, alice_signup.text
+    alice_login = await client.post(
+        "/auth/login", json={"email": "alice5@example.com", "password": "hunter2hunter2"}
+    )
+    assert alice_login.status_code == 200, alice_login.text
 
-    await client.post("/auth/signup", json={"email": "bob5@example.com", "password": "hunter2hunter2"})
-    await client.post("/auth/login", json={"email": "bob5@example.com", "password": "hunter2hunter2"})
+    created = await client.post("/melds", json={"title": "Alice's"})
+    assert created.status_code == 201, created.text
+    meld_id = created.json()["id"]
 
-    response = await client.put(f"/melds/{created['id']}/story", json={"text": "intruder"})
+    logout = await client.post("/auth/logout")
+    assert logout.status_code == 204, logout.text
+
+    bob_signup = await client.post(
+        "/auth/signup", json={"email": "bob5@example.com", "password": "hunter2hunter2"}
+    )
+    assert bob_signup.status_code == 201, bob_signup.text
+    bob_login = await client.post(
+        "/auth/login", json={"email": "bob5@example.com", "password": "hunter2hunter2"}
+    )
+    assert bob_login.status_code == 200, bob_login.text
+
+    response = await client.put(f"/melds/{meld_id}/story", json={"text": "intruder"})
     assert response.status_code == 404
