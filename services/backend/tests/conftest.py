@@ -1,3 +1,5 @@
+from collections.abc import AsyncGenerator
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -14,6 +16,9 @@ import framemeld.models  # noqa: F401
 
 @pytest.fixture(scope="session")
 async def test_engine():
+    assert settings.test_database_url != settings.database_url, (
+        "TEST_DATABASE_URL must differ from DATABASE_URL — test setup drops all tables"
+    )
     # NullPool: the session-scoped engine outlives individual tests, and a
     # pooled connection held across an event-loop boundary raises in asyncio.
     engine = create_async_engine(settings.test_database_url, poolclass=NullPool)
@@ -25,7 +30,7 @@ async def test_engine():
 
 
 @pytest.fixture
-async def db(test_engine) -> AsyncSession:
+async def db(test_engine) -> AsyncGenerator[AsyncSession, None]:
     """A session wrapped in a transaction that is always rolled back.
 
     Binding the session to an explicit connection (rather than letting it
@@ -33,32 +38,37 @@ async def db(test_engine) -> AsyncSession:
     the request handler committed inside this transaction is undone too.
     """
     connection = await test_engine.connect()
-    transaction = await connection.begin()
-    session = async_sessionmaker(
-        bind=connection,
-        expire_on_commit=False,
-        # Route the session's own commits into savepoints instead of letting
-        # them close the outer transaction. Route handlers in later tasks call
-        # session.commit(); without this the first commit ends the transaction
-        # this fixture rolls back, and tests start leaking state into each
-        # other — passing alone, failing together.
-        join_transaction_mode="create_savepoint",
-    )()
-
-    yield session
-
-    await session.close()
-    await transaction.rollback()
-    await connection.close()
+    try:
+        transaction = await connection.begin()
+        session = async_sessionmaker(
+            bind=connection,
+            expire_on_commit=False,
+            # Route the session's own commits into savepoints instead of letting
+            # them close the outer transaction. Route handlers in later tasks call
+            # session.commit(); without this the first commit ends the transaction
+            # this fixture rolls back, and tests start leaking state into each
+            # other — passing alone, failing together.
+            join_transaction_mode="create_savepoint",
+        )()
+        try:
+            yield session
+        finally:
+            await session.close()
+            if transaction.is_active:
+                await transaction.rollback()
+    finally:
+        await connection.close()
 
 
 @pytest.fixture
-async def client(db) -> AsyncClient:
+async def client(db) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_session():
         yield db
 
     app.dependency_overrides[get_session] = override_get_session
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_session, None)
