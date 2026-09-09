@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getMeld, saveStory, type MeldDetail } from "@/lib/api";
+import { ApiError, getMeld, saveStory, type MeldDetail } from "@/lib/api";
 import { useAutosave, type SaveStatus } from "@/lib/useAutosave";
 
 const STATUS_TEXT: Record<SaveStatus, string> = {
@@ -21,6 +21,7 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
   const [meld, setMeld] = useState<MeldDetail | null>(null);
   const [text, setText] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     getMeld(id)
@@ -29,7 +30,20 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
         setText(detail.story?.text ?? "");
         setLoaded(true);
       })
-      .catch(() => router.replace("/melds"));
+      .catch((err) => {
+        // Only a 401 means the session is gone. A 404 means this Meld is
+        // genuinely gone or not theirs, so bounce to the dashboard. Any
+        // other failure — the API unreachable, a 500 — must not masquerade
+        // as either, or a transient blip strands or misdirects a user whose
+        // Meld is fine. Mirrors /melds's refresh() classification.
+        if (err instanceof ApiError && err.status === 401) {
+          router.replace("/login");
+        } else if (err instanceof ApiError && err.status === 404) {
+          router.replace("/melds");
+        } else {
+          setLoadError("Couldn't load this Meld. Check your connection and reload.");
+        }
+      });
   }, [id, router]);
 
   const onSave = useCallback(
@@ -40,6 +54,16 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
   );
 
   const { status } = useAutosave({ value: text, onSave, delayMs: 800, enabled: loaded });
+
+  if (loadError) {
+    return (
+      <main className="p-8">
+        <p role="alert" className="text-sm text-red-600">
+          {loadError}
+        </p>
+      </main>
+    );
+  }
 
   if (!loaded || meld === null) {
     return <main className="p-8 text-sm text-neutral-500">Loading…</main>;

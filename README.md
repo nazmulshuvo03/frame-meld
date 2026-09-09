@@ -16,7 +16,7 @@ back. No AI calls yet — those start in M2.
 
 What's verified and how:
 
-- The backend test suite (71 tests: auth, sessions, password hashing, Meld
+- The backend test suite (72 tests: auth, sessions, password hashing, Meld
   CRUD, story save/hash) passes — see [Tests](#tests) below.
 - Ownership checks are enforced at the API: a logged-out request to any
   `/melds` endpoint returns 401, and a request for another user's Meld
@@ -25,12 +25,11 @@ What's verified and how:
 - Deleting a Meld soft-deletes it (`deleted_at` is set; the row stays).
 - The story editor's autosave debounce (one save request per pause in
   typing, not one per keystroke) is implemented in
-  `apps/web/lib/useAutosave.ts` and exercised by the backend's
-  `input_hash`-stability tests. **It has not been driven through a real
+  `apps/web/lib/useAutosave.ts`. **It has not been driven through a real
   browser in an automated session** — the debounce behavior is verified by
-  code review and HTTP-level checks against the save endpoint, not by an
-  actual person typing into the page. Treat the end-to-end "type → close
-  tab → reopen → text is there" claim as plausible but not
+  code review and a standalone simulation of the hook's decision logic, not
+  by an actual person typing into the page. Treat the end-to-end "type →
+  close tab → reopen → text is there" claim as plausible but not
   browser-verified.
 
 ## Layout
@@ -49,7 +48,7 @@ tested against Node v25.9.0 with Next.js 16.3.4 / React 19.2.8).
 
 ```bash
 cp .env.example .env
-docker compose up -d
+docker compose up -d --wait
 docker compose exec postgres createdb -U framemeld framemeld_test  # once
 
 cd services/backend
@@ -69,28 +68,22 @@ sessions) then `8cea41eb5150` (melds and stories).
 
 ## Tests
 
-Backend tests must be run from `services/backend`, not the repo root —
-`config.py` resolves `.env` relative to the current working directory, and
-from the repo root that resolution fails before any tests can even collect
-(a pydantic `ValidationError` on `test_database_url`). See
-[Known gaps](#known-gaps).
-
 ```bash
 cd services/backend
 conda run --no-capture-output -n framemeld pytest -v
 conda run --no-capture-output -n framemeld ruff check src tests
+conda run --no-capture-output -n framemeld ruff format --check src tests
 ```
 
-`pytest` passes: **71 passed**. `ruff check` currently reports **4
-pre-existing errors** (two `RUF100` unused-`noqa` in
-`src/framemeld/models/__init__.py`, one `I001` unsorted-imports in
-`tests/conftest.py`, one `DTZ001` naive-datetime in `tests/test_hashing.py`)
-left over from earlier tasks; they're scheduled for a lint-and-format pass
-after the whole-branch review, not fixed here. Don't take "ruff check
-passes" as a currently-true statement — it doesn't, yet.
+`pytest` passes: **72 passed**. `ruff check` and `ruff format --check` are
+both clean against the explicit rule selection in `pyproject.toml`.
+`config.py` resolves `.env` relative to this file's own location rather
+than the working directory, so `pytest` also works unmodified from the
+repo root.
 
 Frontend: `cd apps/web && npm run build` compiles and prerenders all
-routes cleanly. There is no frontend test suite in M1.
+routes cleanly. `npm run lint` and `npx tsc --noEmit` are also clean.
+There is no frontend test suite in M1.
 
 ## Known gaps
 
@@ -103,13 +96,6 @@ them for oversights:
 - **`secure=False` on the session cookie** (`src/framemeld/auth/router.py`).
   Correct for `http://localhost`; must become `True` behind TLS before any
   public deploy.
-- **4 outstanding `ruff check` errors** in `src/` and `tests/` (listed
-  above under [Tests](#tests)), scheduled for a lint-and-format pass after
-  the whole-branch review.
-- **`pytest` fails from the repo root**, not just from `services/backend`
-  — `config.py`'s relative `.env` path assumes the working directory is
-  `services/backend`. Known issue, scheduled for the same later pass. Run
-  tests from `services/backend`.
 - Also absent, arriving in later milestones: Redis, the arq worker, and
   the `jobs` table; any AI provider call or adapter; `scenes`, `shots`,
   and staleness propagation (M2); `characters`, the credit ledger,

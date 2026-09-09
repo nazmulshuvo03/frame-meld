@@ -168,6 +168,14 @@ async def test_save_story_changes_the_hash_when_the_text_changes(db):
     assert reloaded.story.input_hash != first_hash
 
 
+async def test_rename_meld_returns_none_for_another_users_meld(db):
+    alice = await _make_user(db, "alice6@example.com")
+    bob = await _make_user(db, "bob6@example.com")
+    meld = await create_meld(db, alice.id, "Alice's")
+
+    assert await rename_meld(db, bob.id, meld.id, "Intruder") is None
+
+
 async def test_save_story_returns_none_for_another_users_meld(db):
     alice = await _make_user(db, "alice4@example.com")
     bob = await _make_user(db, "bob4@example.com")

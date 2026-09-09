@@ -59,6 +59,11 @@ export default function MeldsPage() {
   );
 
   useEffect(() => {
+    // False positive: refresh() only calls setMelds/setLoadError after
+    // `await listMelds()` resolves, so nothing here runs synchronously
+    // within the effect body — there is no cascading-render risk to warn
+    // about.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
 

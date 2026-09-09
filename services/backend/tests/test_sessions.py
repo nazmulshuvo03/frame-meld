@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -26,7 +27,10 @@ async def test_raw_token_is_not_stored_in_the_database(db):
 
     stored = (await db.execute(select(Session))).scalars().all()
     assert len(stored) == 1
-    assert stored[0].token_hash != token
+    # Asserting != token would pass for base64, rot13, or a truncation of
+    # it — only asserting the exact expected digest proves it's actually
+    # the SHA-256 hash, not merely "different from the raw token".
+    assert stored[0].token_hash == hashlib.sha256(token.encode()).hexdigest()
 
 
 async def test_resolve_returns_the_user(db):
