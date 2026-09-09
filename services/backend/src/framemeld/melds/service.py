@@ -16,13 +16,17 @@ def story_hash(text: str) -> str:
 
 
 async def create_meld(db: DbSession, user_id: uuid.UUID, title: str) -> Meld:
-    # created_at is set explicitly rather than left to the column's
-    # server_default=func.now(). Postgres's now() is frozen for the whole
-    # transaction, so two Melds created in the same transaction (as
-    # happens in tests, and could happen from the same request) would
-    # otherwise get an identical created_at and make "newest first"
-    # ordering nondeterministic between them.
-    meld = Meld(user_id=user_id, title=title, created_at=datetime.now(UTC))
+    # created_at and updated_at are set explicitly rather than left to the
+    # columns' server_default=func.now(). Postgres's now() is frozen for the
+    # whole transaction, so two Melds created in the same transaction (as
+    # happens in tests) would otherwise share a created_at and leave
+    # "newest first" ordering undefined between them.
+    #
+    # Both come from one value so a new Meld cannot show updated_at before
+    # created_at if the app and database clocks differ. The server defaults
+    # stay in place as the fallback for any other insert path.
+    now = datetime.now(UTC)
+    meld = Meld(user_id=user_id, title=title, created_at=now, updated_at=now)
     db.add(meld)
     await db.flush()
 
