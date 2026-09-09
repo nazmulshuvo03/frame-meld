@@ -1,3 +1,7 @@
+import datetime
+
+import pytest
+
 from framemeld.hashing import canonical_hash
 
 
@@ -36,3 +40,17 @@ def test_int_and_string_are_different():
 def test_list_order_is_significant():
     """Shot order matters, so list order must affect the hash."""
     assert canonical_hash({"a": [1, 2]}) != canonical_hash({"a": [2, 1]})
+
+
+def test_set_raises_rather_than_hashing_unstably():
+    """A set's str() order depends on PYTHONHASHSEED, so silently accepting
+    one would mean a different hash on every process restart."""
+    with pytest.raises(TypeError):
+        canonical_hash({"a": {1, 2, 3}})
+
+
+def test_non_json_native_value_raises_rather_than_colliding():
+    """str() coercion would make this datetime hash identically to the
+    string "2024-01-01 12:00:00"."""
+    with pytest.raises(TypeError):
+        canonical_hash({"a": datetime.datetime(2024, 1, 1, 12, 0, 0)})
