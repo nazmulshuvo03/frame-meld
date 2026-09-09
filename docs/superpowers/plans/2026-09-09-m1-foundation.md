@@ -2609,7 +2609,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       router.replace("/melds");
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        setError("That email is already registered.");
+        setError("That email is already registered. Try logging in instead.");
       } else if (err instanceof ApiError && err.status === 401) {
         setError("Invalid email or password.");
       } else if (err instanceof ApiError && err.status === 422) {
@@ -2650,7 +2650,11 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           />
         </label>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && (
+          <p role="alert" className="text-sm text-red-600">
+            {error}
+          </p>
+        )}
 
         <button
           type="submit"
