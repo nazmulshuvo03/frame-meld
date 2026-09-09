@@ -41,7 +41,9 @@ async def list_melds(db: DbSession, user_id: uuid.UUID) -> list[Meld]:
     result = await db.execute(
         select(Meld)
         .where(Meld.user_id == user_id, Meld.deleted_at.is_(None))
-        .order_by(Meld.created_at.desc())
+        # id as a tie-break makes this a total order independent of clock
+        # resolution, rather than relying purely on wall-clock created_at.
+        .order_by(Meld.created_at.desc(), Meld.id.desc())
     )
     return list(result.scalars().all())
 
@@ -62,6 +64,11 @@ async def rename_meld(
     if meld is None:
         return None
     meld.title = title
+    # Assigned explicitly so onupdate=func.now() does not apply. Every
+    # timestamp in this service comes from the app clock, because
+    # created_at does; func.now() is transaction-scoped and would be
+    # earlier than a created_at taken later in the same transaction.
+    meld.updated_at = datetime.now(UTC)
     await db.flush()
     return meld
 
@@ -70,7 +77,7 @@ async def soft_delete_meld(db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID
     meld = await get_meld(db, user_id, meld_id)
     if meld is None:
         return False
-    meld.deleted_at = datetime.now(UTC)
+    meld.deleted_at = meld.updated_at = datetime.now(UTC)
     await db.flush()
     return True
 
@@ -82,9 +89,21 @@ async def save_story(
     if meld is None:
         return None
 
-    result = await db.execute(select(Story).where(Story.meld_id == meld_id))
-    story = result.scalar_one()
+    # get_meld already eager-loaded this via selectinload, so no second
+    # query is needed. A Meld with no Story returns None rather than
+    # raising, so it becomes a 404 instead of a 500.
+    story = meld.story
+    if story is None:
+        return None
+
+    now = datetime.now(UTC)
     story.text = text
     story.input_hash = story_hash(text)
+    story.updated_at = now
+    # Editing a Meld's story updates the Meld. The dashboard renders
+    # "updated {meld.updated_at}" on every card, so without this a user
+    # who writes for an hour still sees their Meld labelled with its
+    # creation date.
+    meld.updated_at = now
     await db.flush()
     return story

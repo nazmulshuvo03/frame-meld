@@ -1,5 +1,7 @@
 import uuid
 
+from sqlalchemy import select
+
 from framemeld.melds.service import (
     create_meld,
     get_meld,
@@ -9,7 +11,7 @@ from framemeld.melds.service import (
     soft_delete_meld,
     story_hash,
 )
-from framemeld.models.meld import MeldStage
+from framemeld.models.meld import Meld, MeldStage
 from framemeld.models.user import User
 
 
@@ -77,12 +79,21 @@ async def test_get_meld_returns_none_for_an_unknown_id(db):
 async def test_soft_delete_does_not_remove_the_row(db):
     user = await _make_user(db, "e@example.com")
     meld = await create_meld(db, user.id, "Doomed")
+    meld_id = meld.id
 
-    await soft_delete_meld(db, user.id, meld.id)
+    await soft_delete_meld(db, user.id, meld_id)
 
-    assert await get_meld(db, user.id, meld.id) is None
-    # The row still exists, it is only filtered out.
-    assert meld.deleted_at is not None
+    assert await get_meld(db, user.id, meld_id) is None
+
+    # Expire the instance so the assertion below re-reads from Postgres
+    # rather than from the identity map — the point of a soft delete is
+    # that the row is still there.
+    db.expire(meld)
+    surviving = (
+        await db.execute(select(Meld).where(Meld.id == meld_id))
+    ).scalar_one_or_none()
+    assert surviving is not None
+    assert surviving.deleted_at is not None
 
 
 async def test_soft_delete_returns_false_for_another_users_meld(db):
