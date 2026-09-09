@@ -96,7 +96,7 @@ framemeld/
 ## Task 1: Repo scaffold, Postgres, and a health endpoint
 
 **Files:**
-- Create: `.gitignore`, `.env.example`, `docker-compose.yml`, `environment.yml`, `README.md`
+- Create: `.gitignore`, `.env.example`, `docker-compose.yml`, `environment.yml`
 - Create: `services/backend/pyproject.toml`
 - Create: `services/backend/src/framemeld/__init__.py`
 - Create: `services/backend/src/framemeld/config.py`
@@ -458,7 +458,16 @@ async def db(test_engine) -> AsyncSession:
     """
     connection = await test_engine.connect()
     transaction = await connection.begin()
-    session = async_sessionmaker(bind=connection, expire_on_commit=False)()
+    session = async_sessionmaker(
+        bind=connection,
+        expire_on_commit=False,
+        # Route the session's own commits into savepoints instead of letting
+        # them close the outer transaction. Route handlers in later tasks call
+        # session.commit(); without this the first commit ends the transaction
+        # this fixture rolls back, and tests start leaking state into each
+        # other — passing alone, failing together.
+        join_transaction_mode="create_savepoint",
+    )()
 
     yield session
 
@@ -1392,7 +1401,9 @@ Create `services/backend/tests/test_models_meld.py`:
 
 ```python
 import pytest
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 
 from framemeld.models.meld import Meld, MeldStage, MeldStatus, Story
 from framemeld.models.user import User
@@ -1447,9 +1458,23 @@ async def test_deleting_a_meld_cascades_to_its_story(db):
     await db.flush()
     db.add(Story(meld_id=meld.id, text="text", input_hash="abc"))
     await db.flush()
+    meld_id = meld.id
 
-    await db.delete(meld)
+    # Load the relationship before deleting: under asyncio, an ORM cascade
+    # over an unloaded relationship raises MissingGreenlet.
+    loaded = (
+        await db.execute(
+            select(Meld).options(selectinload(Meld.story)).where(Meld.id == meld_id)
+        )
+    ).scalar_one()
+
+    await db.delete(loaded)
     await db.flush()
+
+    orphan = (
+        await db.execute(select(Story).where(Story.meld_id == meld_id))
+    ).scalar_one_or_none()
+    assert orphan is None
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
