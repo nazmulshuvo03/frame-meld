@@ -36,6 +36,28 @@ export default function MeldsPage() {
     }
   }, [router]);
 
+  /** Turn a mutation failure into the right user-visible outcome.
+   *
+   *  401 — the session is gone; go to login rather than blaming the action.
+   *  404 — the row is gone (deleted here, or in another tab). Resync so the
+   *        card disappears; claiming the action failed would be a false alarm.
+   *  else — a genuine transient failure, so say so.
+   */
+  const handleMutationError = useCallback(
+    async (err: unknown, message: string) => {
+      if (err instanceof ApiError && err.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (err instanceof ApiError && err.status === 404) {
+        await refresh();
+        return;
+      }
+      alert(message);
+    },
+    [router, refresh],
+  );
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -46,9 +68,9 @@ export default function MeldsPage() {
     try {
       const created = await createMeld();
       router.push(`/meld/${created.id}`);
-    } catch {
-      alert("Couldn't create a Meld. Please try again.");
+    } catch (err) {
       setCreating(false);
+      await handleMutationError(err, "Couldn't create a Meld. Please try again.");
     }
   }
 
@@ -56,8 +78,8 @@ export default function MeldsPage() {
     try {
       await renameMeld(id, title);
       await refresh();
-    } catch {
-      alert("Couldn't rename this Meld. Please try again.");
+    } catch (err) {
+      await handleMutationError(err, "Couldn't rename this Meld. Please try again.");
     }
   }
 
@@ -66,8 +88,8 @@ export default function MeldsPage() {
     try {
       await deleteMeld(id);
       await refresh();
-    } catch {
-      alert("Couldn't delete this Meld. Please try again.");
+    } catch (err) {
+      await handleMutationError(err, "Couldn't delete this Meld. Please try again.");
     }
   }
 
