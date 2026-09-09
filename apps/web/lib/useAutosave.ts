@@ -30,6 +30,12 @@ export function useAutosave<T>({
   const savedRef = useRef<T>(value);
   const firstRunRef = useRef(true);
 
+  // What the server will hold once the queue drains. Distinct from savedRef,
+  // which is what it has *confirmed* — those differ for one round trip after
+  // every dispatch, and comparing against the wrong one lets the hook report
+  // "saved" while a request for different text is still in flight.
+  const pendingRef = useRef<T>(value);
+
   // The newest value the hook has seen, used to tell whether a completed
   // save is still current.
   const latestRef = useRef<T>(value);
@@ -59,6 +65,7 @@ export function useAutosave<T>({
     // re-bound target if the caller's onSave identity changed in between.
     const fn = onSaveRef.current;
     const run = () => fn(next);
+    pendingRef.current = next;
     // Chained on both settle paths so one failed save cannot stall the queue.
     queueRef.current = queueRef.current.then(run, run);
     return queueRef.current;
@@ -69,7 +76,7 @@ export function useAutosave<T>({
   // last delayMs without a trace.
   useEffect(() => {
     return () => {
-      if (latestRef.current !== savedRef.current) {
+      if (latestRef.current !== pendingRef.current) {
         // Queued rather than fired directly, so it lands after any save
         // already in flight instead of racing it. The catch only suppresses
         // an unhandled rejection — there is no UI left to report to.
@@ -93,10 +100,11 @@ export function useAutosave<T>({
     if (firstRunRef.current) {
       firstRunRef.current = false;
       savedRef.current = value;
+      pendingRef.current = value;
       return;
     }
 
-    if (value === savedRef.current) {
+    if (value === pendingRef.current) {
       // The value matches what was last confirmed — the user undid their
       // edit. Report it as saved rather than leaving a stale "unsaved",
       // which would nag on close for work that is not actually pending.
@@ -126,6 +134,11 @@ export function useAutosave<T>({
         // the last of them settle the status. Claiming "saved" here would
         // un-arm the close warning while an older value is still queued.
       } catch {
+        // The server never received `attempted`, so what it will hold is
+        // still whatever it last confirmed. Without resetting this, the
+        // unmount flush would see pendingRef already claiming the failed
+        // text and decline to retry it.
+        pendingRef.current = savedRef.current;
         setStatus("error");
       }
     }, delayMs);
