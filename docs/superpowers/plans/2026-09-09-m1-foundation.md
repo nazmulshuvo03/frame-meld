@@ -1299,6 +1299,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
 from framemeld.auth.deps import CurrentUser
@@ -1343,7 +1344,19 @@ async def signup(credentials: Credentials, db: Db) -> User:
 
     user = User(email=credentials.email, password_hash=hash_password(credentials.password))
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Two concurrent signups for the same address both passed the check
+        # above — reachable by double-clicking submit, not just by a
+        # contrived race. The unique index is the real guard; convert its
+        # error into the same 409 the sequential path returns rather than
+        # letting it surface as a 500. The rollback is required: after a
+        # failed commit the session refuses further use until it happens.
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
+        ) from None
     await db.refresh(user)
     return user
 
@@ -1356,7 +1369,12 @@ async def login(credentials: Credentials, response: Response, db: Db) -> User:
     user = result.scalar_one_or_none()
 
     # One error for both "no such user" and "wrong password", so the
-    # response cannot be used to enumerate registered emails.
+    # response body cannot be used to enumerate registered emails.
+    # Note the response *time* still can: argon2 only runs when a user
+    # matched, so a wrong-password login is measurably slower (~69ms)
+    # than an unknown-email one. Signup's 409 already reveals the same
+    # fact, so this is accepted for M1 -- but if signup ever stops
+    # enumerating, this needs a dummy-hash verify on the None path.
     if user is None or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
@@ -1405,15 +1423,28 @@ Append to `services/backend/tests/conftest.py`:
 @pytest.fixture
 async def logged_in(client) -> AsyncClient:
     """A client that has signed up and logged in. Meld tests need an
-    authenticated caller for every request, so this keeps them readable."""
-    await client.post(
+    authenticated caller for every request, so this keeps them readable.
+
+    Both calls are asserted: a silent failure here would hand every
+    dependent test an unauthenticated client, and they would fail with
+    confusing 401s far from the actual cause.
+    """
+    signup = await client.post(
         "/auth/signup", json={"email": "owner@example.com", "password": "hunter2hunter2"}
     )
-    await client.post(
+    assert signup.status_code == 201, signup.text
+
+    login = await client.post(
         "/auth/login", json={"email": "owner@example.com", "password": "hunter2hunter2"}
     )
+    assert login.status_code == 200, login.text
+
     return client
 ```
+
+Every Meld test in Tasks 9 and 10 depends on this fixture. Without the
+assertions a broken signup would surface as 401s inside those tests, pointing
+at Meld code rather than at the fixture.
 
 - [ ] **Step 8: Run the full suite**
 
