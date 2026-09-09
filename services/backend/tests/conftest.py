@@ -72,3 +72,16 @@ async def client(db) -> AsyncGenerator[AsyncClient, None]:
             yield c
     finally:
         app.dependency_overrides.pop(get_session, None)
+
+
+@pytest.fixture
+async def logged_in(client) -> AsyncClient:
+    """A client that has signed up and logged in. Meld tests need an
+    authenticated caller for every request, so this keeps them readable."""
+    await client.post(
+        "/auth/signup", json={"email": "owner@example.com", "password": "hunter2hunter2"}
+    )
+    await client.post(
+        "/auth/login", json={"email": "owner@example.com", "password": "hunter2hunter2"}
+    )
+    return client

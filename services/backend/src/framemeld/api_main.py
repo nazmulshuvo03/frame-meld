@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from framemeld.auth.router import router as auth_router
 from framemeld.config import settings
 
 app = FastAPI(title="FrameMeld API")
@@ -12,6 +13,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 
 @app.get("/health")
