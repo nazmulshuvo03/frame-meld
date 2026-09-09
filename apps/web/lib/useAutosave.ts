@@ -54,7 +54,11 @@ export function useAutosave<T>({
   const queueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const enqueueSave = useCallback((next: T) => {
-    const run = () => onSaveRef.current(next);
+    // Both the value and the target are bound here, at issue time. Reading
+    // onSaveRef at dispatch time instead would pair a queued value with a
+    // re-bound target if the caller's onSave identity changed in between.
+    const fn = onSaveRef.current;
+    const run = () => fn(next);
     // Chained on both settle paths so one failed save cannot stall the queue.
     queueRef.current = queueRef.current.then(run, run);
     return queueRef.current;
@@ -106,23 +110,21 @@ export function useAutosave<T>({
       const attempted = value;
       setStatus("saving");
       try {
-        await enqueueSave(attempted);
+        const link = enqueueSave(attempted);
+        await link;
         savedRef.current = attempted;
-        // Only claim "saved" if this is still the newest value. If the
-        // user changed it while the request was in flight, a pending timer
-        // will save the newer value; saying "saved" here would tell them
-        // their latest work is safe when it is not.
-        if (attempted === latestRef.current) {
-          setStatus("saved");
-        } else {
-          // The value changed while this request was in flight, and the
-          // effect will not re-run on its own — value may now equal a
-          // value it has already seen (e.g. reverted to what savedRef used
-          // to hold). Nudge it, so the current value gets saved instead of
-          // sitting on screen while the server holds something else and
-          // the status reads "saved".
+
+        if (attempted !== latestRef.current) {
+          // The text changed while this was in flight and the effect will
+          // not re-run on its own — nudge it.
           setSaveTick((tick) => tick + 1);
+        } else if (queueRef.current === link) {
+          // Newest text, and nothing queued behind us: genuinely saved.
+          setStatus("saved");
         }
+        // Otherwise later links are still pending; leave "saving" and let
+        // the last of them settle the status. Claiming "saved" here would
+        // un-arm the close warning while an older value is still queued.
       } catch {
         setStatus("error");
       }
