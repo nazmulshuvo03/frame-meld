@@ -575,7 +575,25 @@ def test_int_and_string_are_different():
 def test_list_order_is_significant():
     """Shot order matters, so list order must affect the hash."""
     assert canonical_hash({"a": [1, 2]}) != canonical_hash({"a": [2, 1]})
+
+
+def test_set_raises_rather_than_hashing_unstably():
+    """A set's str() order depends on PYTHONHASHSEED, so silently accepting
+    one would mean a different hash on every process restart."""
+    with pytest.raises(TypeError):
+        canonical_hash({"a": {1, 2, 3}})
+
+
+def test_non_json_native_value_raises_rather_than_colliding():
+    """str() coercion would make this datetime hash identically to the
+    string "2024-01-01 12:00:00"."""
+    with pytest.raises(TypeError):
+        canonical_hash({"a": datetime.datetime(2024, 1, 1, 12, 0, 0)})
 ```
+
+The last two tests exist to stop a future contributor "fixing" an unexpected
+`TypeError` by reinstating `default=str`. They need `import datetime` and
+`import pytest` at the top of the file.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -598,24 +616,40 @@ def canonical_hash(payload: dict[str, Any]) -> str:
     upstream artifacts' input_hash values plus its own prompt, provider,
     model and params through this function.
 
-    sort_keys makes key order irrelevant; separators removes the
+    sort_keys makes mapping key order irrelevant; separators removes the
     whitespace that would otherwise vary between Python versions;
     ensure_ascii keeps the bytes stable regardless of locale.
+
+    Only JSON-native values are accepted. Anything else — datetime,
+    Decimal, UUID, set, a custom object — raises TypeError, deliberately.
+    Coercing them with str() would let a typed value collide with its own
+    string form, and would make any set hash differently on every process
+    restart. Callers must convert to a JSON-native value explicitly.
+
+    One known ambiguity is accepted: tuples and lists serialise
+    identically, so (1, 2) and [1, 2] hash the same. Both mean "ordered
+    sequence" here, so that is intended rather than overlooked.
     """
     serialised = json.dumps(
         payload,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
-        default=str,
     )
     return hashlib.sha256(serialised.encode("utf-8")).hexdigest()
 ```
 
+**Do not add `default=str` to that call.** It looks like a convenience and is a
+correctness bug: `datetime(2024, 1, 1, 12, 0, 0)` would hash identically to the
+string `"2024-01-01 12:00:00"`, and any `set` would hash differently on every
+process restart because `str(set)` ordering follows `PYTHONHASHSEED`. Since this
+function decides whether paid, generated work is stale, either failure silently
+bills users to regenerate work that was fine.
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `conda run --no-capture-output -n framemeld pytest tests/test_hashing.py -v`
-Expected: PASS, 7 tests
+Expected: PASS, 9 tests
 
 - [ ] **Step 5: Commit**
 
@@ -3062,7 +3096,7 @@ git commit -m "docs: document M1 setup and status"
 From spec §9. All must hold before M2 begins.
 
 - [ ] A user signs up, creates a Meld, types a story, closes the tab, and finds the text intact on return.
-- [ ] `conda run --no-capture-output -n framemeld pytest` passes — 67 tests: health 1, hashing 7, passwords 5, user models 3, sessions 8, auth API 10, meld models 4, meld service 13, meld API 16.
+- [ ] `conda run --no-capture-output -n framemeld pytest` passes — 69 tests: health 1, hashing 9, passwords 5, user models 3, sessions 8, auth API 10, meld models 4, meld service 13, meld API 16.
 - [ ] `conda run --no-capture-output -n framemeld ruff check src tests` is clean.
 - [ ] A logged-out request to any `/melds` endpoint returns 401.
 - [ ] A request for another user's Meld returns **404**, not 403.
