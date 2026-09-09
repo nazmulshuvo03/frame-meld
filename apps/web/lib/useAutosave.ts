@@ -116,9 +116,10 @@ export function useAutosave<T>({
 
     const timer = setTimeout(async () => {
       const attempted = value;
+      let link: Promise<unknown> | undefined;
       setStatus("saving");
       try {
-        const link = enqueueSave(attempted);
+        link = enqueueSave(attempted);
         await link;
         savedRef.current = attempted;
 
@@ -135,10 +136,15 @@ export function useAutosave<T>({
         // un-arm the close warning while an older value is still queued.
       } catch {
         // The server never received `attempted`, so what it will hold is
-        // still whatever it last confirmed. Without resetting this, the
-        // unmount flush would see pendingRef already claiming the failed
-        // text and decline to retry it.
-        pendingRef.current = savedRef.current;
+        // still whatever it last confirmed — but only when nothing is
+        // queued behind us. A later link has already re-pointed pendingRef
+        // at newer text that is still going to be sent, and resetting here
+        // would make the hook believe the server holds text it never
+        // received — the same false "saved" this reset exists to prevent,
+        // reached from the other side.
+        if (queueRef.current === link) {
+          pendingRef.current = savedRef.current;
+        }
         setStatus("error");
       }
     }, delayMs);

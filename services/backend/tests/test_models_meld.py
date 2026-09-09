@@ -48,10 +48,15 @@ async def test_stage_rejects_a_value_outside_the_enum(db):
 
 
 async def test_stage_check_constraint_exists_in_the_database(db):
-    """The Python-side enum rejects bad values before SQL is emitted, so the
-    test above passes even with create_constraint=False. This one proves the
-    database itself refuses — which is what protects rows written by anything
-    that is not this ORM."""
+    """Proves the database itself refuses a bad stage, independently of the ORM.
+
+    The Python-level test above also depends on this CHECK constraint —
+    SQLAlchemy passes plain-string enum values through untouched when
+    validate_strings is False, so it never raises at bind time. But it
+    accepts several exception types, so it cannot say which layer refused
+    and would stay green if enforcement silently moved into Python. This
+    one pins the database.
+    """
     user = await _make_user(db)
     with pytest.raises(IntegrityError):
         await db.execute(

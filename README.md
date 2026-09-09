@@ -16,7 +16,7 @@ back. No AI calls yet — those start in M2.
 
 What's verified and how:
 
-- The backend test suite (72 tests: auth, sessions, password hashing, Meld
+- The backend test suite (74 tests: auth, sessions, password hashing, Meld
   CRUD, story save/hash) passes — see [Tests](#tests) below.
 - Ownership checks are enforced at the API: a logged-out request to any
   `/melds` endpoint returns 401, and a request for another user's Meld
@@ -27,10 +27,10 @@ What's verified and how:
   typing, not one per keystroke) is implemented in
   `apps/web/lib/useAutosave.ts`. **It has not been driven through a real
   browser in an automated session** — the debounce behavior is verified by
-  code review and a standalone simulation of the hook's decision logic, not
-  by an actual person typing into the page. Treat the end-to-end "type →
-  close tab → reopen → text is there" claim as plausible but not
-  browser-verified.
+  code review and a one-off simulation of the hook's decision logic that was
+  not retained in the repo, not by an actual person typing into the page.
+  Treat the end-to-end "type → close tab → reopen → text is there" claim as
+  plausible but not browser-verified.
 
 ## Layout
 
@@ -75,7 +75,7 @@ conda run --no-capture-output -n framemeld ruff check src tests
 conda run --no-capture-output -n framemeld ruff format --check src tests
 ```
 
-`pytest` passes: **72 passed**. `ruff check` and `ruff format --check` are
+`pytest` passes: **74 passed**. `ruff check` and `ruff format --check` are
 both clean against the explicit rule selection in `pyproject.toml`.
 `config.py` resolves `.env` relative to this file's own location rather
 than the working directory, so `pytest` also works unmodified from the
