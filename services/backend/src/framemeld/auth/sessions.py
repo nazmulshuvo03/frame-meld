@@ -47,9 +47,7 @@ async def resolve_session(db: DbSession, raw_token: str) -> User | None:
 
 
 async def revoke_session(db: DbSession, raw_token: str) -> None:
-    result = await db.execute(
-        select(Session).where(Session.token_hash == _hash_token(raw_token))
-    )
+    result = await db.execute(select(Session).where(Session.token_hash == _hash_token(raw_token)))
     session = result.scalar_one_or_none()
     if session is not None:
         session.revoked_at = datetime.now(UTC)

@@ -89,9 +89,7 @@ async def test_soft_delete_does_not_remove_the_row(db):
     # rather than from the identity map — the point of a soft delete is
     # that the row is still there.
     db.expire(meld)
-    surviving = (
-        await db.execute(select(Meld).where(Meld.id == meld_id))
-    ).scalar_one_or_none()
+    surviving = (await db.execute(select(Meld).where(Meld.id == meld_id))).scalar_one_or_none()
     assert surviving is not None
     assert surviving.deleted_at is not None
 

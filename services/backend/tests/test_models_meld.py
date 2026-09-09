@@ -79,15 +79,11 @@ async def test_deleting_a_meld_cascades_to_its_story(db):
     # Load the relationship before deleting: under asyncio, an ORM cascade
     # over an unloaded relationship raises MissingGreenlet.
     loaded = (
-        await db.execute(
-            select(Meld).options(selectinload(Meld.story)).where(Meld.id == meld_id)
-        )
+        await db.execute(select(Meld).options(selectinload(Meld.story)).where(Meld.id == meld_id))
     ).scalar_one()
 
     await db.delete(loaded)
     await db.flush()
 
-    orphan = (
-        await db.execute(select(Story).where(Story.meld_id == meld_id))
-    ).scalar_one_or_none()
+    orphan = (await db.execute(select(Story).where(Story.meld_id == meld_id))).scalar_one_or_none()
     assert orphan is None

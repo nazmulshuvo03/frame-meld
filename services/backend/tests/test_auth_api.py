@@ -24,7 +24,9 @@ async def test_signup_rejects_a_short_password(client):
 
 
 async def test_signup_rejects_a_malformed_email(client):
-    response = await client.post("/auth/signup", json={"email": "notanemail", "password": "hunter2hunter2"})
+    response = await client.post(
+        "/auth/signup", json={"email": "notanemail", "password": "hunter2hunter2"}
+    )
     assert response.status_code == 422
 
 

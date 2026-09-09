@@ -5,13 +5,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from framemeld.api_main import app
-from framemeld.config import settings
-from framemeld.db import Base, get_session
-
 # Import every model module so Base.metadata is fully populated before
 # create_all runs. Without these imports the test schema comes out empty.
 import framemeld.models  # noqa: F401
+from framemeld.api_main import app
+from framemeld.config import settings
+from framemeld.db import Base, get_session
 
 
 @pytest.fixture(scope="session")

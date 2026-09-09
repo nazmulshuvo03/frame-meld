@@ -83,9 +83,7 @@ class Meld(Base):
     aspect_ratio: Mapped[str] = mapped_column(String(10), default="16:9")
     style_preset: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

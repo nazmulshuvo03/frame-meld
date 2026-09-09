@@ -53,4 +53,7 @@ def test_non_json_native_value_raises_rather_than_colliding():
     """str() coercion would make this datetime hash identically to the
     string "2024-01-01 12:00:00"."""
     with pytest.raises(TypeError):
-        canonical_hash({"a": datetime.datetime(2024, 1, 1, 12, 0, 0)})
+        # Naive on purpose: the point of this test is that canonical_hash
+        # rejects a naive datetime outright, so passing tzinfo here would
+        # delete the assertion this test exists to make.
+        canonical_hash({"a": datetime.datetime(2024, 1, 1, 12, 0, 0)})  # noqa: DTZ001

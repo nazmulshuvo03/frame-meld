@@ -21,6 +21,7 @@ router = APIRouter(prefix="/melds", tags=["melds"])
 
 Db = Annotated[DbSession, Depends(get_session)]
 
+
 def _not_found() -> HTTPException:
     """A fresh instance per raise.
 
