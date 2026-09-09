@@ -107,20 +107,37 @@ async def test_soft_delete_returns_false_for_another_users_meld(db):
 async def test_rename_meld_changes_the_title(db):
     user = await _make_user(db, "f@example.com")
     meld = await create_meld(db, user.id, "Old Name")
+    user_id, meld_id = user.id, meld.id
 
-    renamed = await rename_meld(db, user.id, meld.id, "New Name")
+    renamed = await rename_meld(db, user_id, meld_id, "New Name")
     assert renamed is not None
     assert renamed.title == "New Name"
+
+    # Expire so this reload comes from Postgres rather than returning the
+    # same in-memory instance rename_meld already mutated — see
+    # test_soft_delete_does_not_remove_the_row for why that distinction
+    # matters with expire_on_commit=False and a shared test session. The ids
+    # were captured above rather than read off `user`/`meld` afterwards:
+    # under the async ORM, reading an expired attribute triggers an implicit
+    # (unawaited) reload and raises MissingGreenlet.
+    db.expire_all()
+    reloaded = await get_meld(db, user_id, meld_id)
+    assert reloaded is not None
+    assert reloaded.title == "New Name"
 
 
 async def test_save_story_stores_the_text_and_its_hash(db):
     user = await _make_user(db, "g@example.com")
     meld = await create_meld(db, user.id, "Storied")
+    user_id, meld_id = user.id, meld.id
 
-    story = await save_story(db, user.id, meld.id, "Once upon a time")
+    story = await save_story(db, user_id, meld_id, "Once upon a time")
     assert story is not None
-    assert story.text == "Once upon a time"
-    assert story.input_hash == story_hash("Once upon a time")
+
+    db.expire_all()
+    reloaded = await get_meld(db, user_id, meld_id)
+    assert reloaded.story.text == "Once upon a time"
+    assert reloaded.story.input_hash == story_hash("Once upon a time")
 
 
 async def test_save_story_is_idempotent_for_unchanged_text(db):
@@ -128,23 +145,29 @@ async def test_save_story_is_idempotent_for_unchanged_text(db):
     identical hash, so that M2's staleness check sees no change."""
     user = await _make_user(db, "h@example.com")
     meld = await create_meld(db, user.id, "Same")
+    user_id, meld_id = user.id, meld.id
 
-    first = await save_story(db, user.id, meld.id, "unchanged")
+    first = await save_story(db, user_id, meld_id, "unchanged")
     first_hash = first.input_hash
-    second = await save_story(db, user.id, meld.id, "unchanged")
+    await save_story(db, user_id, meld_id, "unchanged")
 
-    assert second.input_hash == first_hash
+    db.expire_all()
+    reloaded = await get_meld(db, user_id, meld_id)
+    assert reloaded.story.input_hash == first_hash
 
 
 async def test_save_story_changes_the_hash_when_the_text_changes(db):
     user = await _make_user(db, "i@example.com")
     meld = await create_meld(db, user.id, "Changing")
+    user_id, meld_id = user.id, meld.id
 
-    first = await save_story(db, user.id, meld.id, "version one")
+    first = await save_story(db, user_id, meld_id, "version one")
     first_hash = first.input_hash
-    second = await save_story(db, user.id, meld.id, "version two")
+    await save_story(db, user_id, meld_id, "version two")
 
-    assert second.input_hash != first_hash
+    db.expire_all()
+    reloaded = await get_meld(db, user_id, meld_id)
+    assert reloaded.story.input_hash != first_hash
 
 
 async def test_save_story_returns_none_for_another_users_meld(db):

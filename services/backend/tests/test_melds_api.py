@@ -34,9 +34,14 @@ async def test_list_melds_requires_authentication(client):
     assert (await client.get("/melds")).status_code == 401
 
 
-async def test_get_meld_includes_the_story(logged_in):
+async def test_get_meld_includes_the_story(logged_in, db):
     created = (await logged_in.post("/melds", json={"title": "With Story"})).json()
 
+    # Expire the identity map so this GET reloads from Postgres instead of
+    # returning the same in-memory objects the POST created — see
+    # test_soft_delete_does_not_remove_the_row for why that distinction
+    # matters with expire_on_commit=False and a shared test session.
+    db.expire_all()
     response = await logged_in.get(f"/melds/{created['id']}")
     assert response.status_code == 200
     body = response.json()
@@ -108,7 +113,7 @@ async def test_delete_meld_returns_404_for_an_unknown_id(logged_in):
     assert (await logged_in.delete(f"/melds/{uuid.uuid4()}")).status_code == 404
 
 
-async def test_save_story_persists_the_text(logged_in):
+async def test_save_story_persists_the_text(logged_in, db):
     created = (await logged_in.post("/melds", json={"title": "Writing"})).json()
 
     save = await logged_in.put(
@@ -117,6 +122,10 @@ async def test_save_story_persists_the_text(logged_in):
     assert save.status_code == 200
     assert save.json()["text"] == "It was a dark and stormy night."
 
+    # Without this, expire_on_commit=False means the GET below returns the
+    # same in-memory Story object the PUT already mutated, so this would
+    # pass even if the write never reached Postgres.
+    db.expire_all()
     reloaded = await logged_in.get(f"/melds/{created['id']}")
     assert reloaded.json()["story"]["text"] == "It was a dark and stormy night."
 

@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -45,6 +45,24 @@ async def test_stage_rejects_a_value_outside_the_enum(db):
     db.add(Meld(user_id=user.id, title="Bad", stage="nonsense"))
     with pytest.raises((IntegrityError, LookupError, ValueError)):
         await db.flush()
+
+
+async def test_stage_check_constraint_exists_in_the_database(db):
+    """The Python-side enum rejects bad values before SQL is emitted, so the
+    test above passes even with create_constraint=False. This one proves the
+    database itself refuses — which is what protects rows written by anything
+    that is not this ORM."""
+    user = await _make_user(db)
+    with pytest.raises(IntegrityError):
+        await db.execute(
+            text(
+                "INSERT INTO melds (id, user_id, title, stage, status,"
+                " moderation_state, aspect_ratio, created_at, updated_at)"
+                " VALUES (gen_random_uuid(), :uid, 'Bad', 'nonsense', 'draft',"
+                " 'pending', '16:9', now(), now())"
+            ),
+            {"uid": user.id},
+        )
 
 
 async def test_deleting_a_meld_cascades_to_its_story(db):
