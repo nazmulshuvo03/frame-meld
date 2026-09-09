@@ -6,7 +6,7 @@
 
 **Architecture:** A monorepo with two deployables in M1 — a Python/FastAPI backend (`services/backend`) and a Next.js frontend (`apps/web`). Postgres is the source of truth, reached through async SQLAlchemy 2.0 with Alembic migrations. Auth is an opaque session token in an HttpOnly cookie, stored hashed in Postgres — no third-party auth vendor. The `render` service and the arq worker are deliberately absent; they arrive in M5 and M2 respectively.
 
-**Tech Stack:** Python 3.12 · FastAPI · SQLAlchemy 2.0 (async, asyncpg) · Alembic · pydantic-settings · argon2-cffi · pytest + pytest-asyncio + httpx · Postgres 16 · Next.js 15 (App Router) · TypeScript · Tailwind CSS 4 · Docker Compose · uv
+**Tech Stack:** Python 3.12 · FastAPI · SQLAlchemy 2.0 (async, asyncpg) · Alembic · pydantic-settings · argon2-cffi · pytest + pytest-asyncio + httpx · Postgres 16 · Next.js 15 (App Router) · TypeScript · Tailwind CSS 4 · Docker Compose · conda (interpreter only; pip installs the deps)
 
 **Spec:** [docs/superpowers/specs/2026-09-09-framemeld-design.md](../specs/2026-09-09-framemeld-design.md)
 
@@ -31,6 +31,7 @@ Every task's requirements implicitly include these. Values are copied verbatim f
 ```
 framemeld/
 ├─ docker-compose.yml            # postgres:16 only in M1
+├─ environment.yml               # conda env: the Python interpreter only
 ├─ .env.example
 ├─ .gitignore
 ├─ README.md
@@ -95,7 +96,7 @@ framemeld/
 ## Task 1: Repo scaffold, Postgres, and a health endpoint
 
 **Files:**
-- Create: `.gitignore`, `.env.example`, `docker-compose.yml`, `README.md`
+- Create: `.gitignore`, `.env.example`, `docker-compose.yml`, `environment.yml`, `README.md`
 - Create: `services/backend/pyproject.toml`
 - Create: `services/backend/src/framemeld/__init__.py`
 - Create: `services/backend/src/framemeld/config.py`
@@ -219,12 +220,38 @@ line-length = 100
 
 `asyncio_mode = "auto"` means async test functions need no `@pytest.mark.asyncio` decorator. Every test in this plan relies on that.
 
+- [ ] **Step 4b: Write environment.yml**
+
+Conda supplies the Python interpreter and nothing else. Every project
+dependency comes from pip, reading `pyproject.toml`. Installing the same
+package from both conda and pip is what makes mixed environments break, so
+this file deliberately lists no project packages.
+
+Create `environment.yml` at the repo root:
+
+```yaml
+name: framemeld
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+```
+
 - [ ] **Step 5: Install dependencies**
+
+The `framemeld` conda env already exists (Python 3.12.14). If it did not,
+`conda env create -f environment.yml` would create it.
 
 ```bash
 cd /f/FrameMeld/services/backend
-uv venv
-uv pip install -e ".[dev]"
+conda run --no-capture-output -n framemeld pip install -e ".[dev]"
+```
+
+Verify the install landed in the right interpreter:
+
+```bash
+conda run --no-capture-output -n framemeld python -c "import fastapi, sqlalchemy, pydantic; print('deps ok')"
 ```
 
 - [ ] **Step 6: Write config.py**
@@ -275,7 +302,7 @@ async def test_health_returns_ok():
 
 - [ ] **Step 8: Run the test to verify it fails**
 
-Run: `cd /f/FrameMeld/services/backend && uv run pytest tests/test_health.py -v`
+Run: `cd /f/FrameMeld/services/backend && conda run --no-capture-output -n framemeld pytest tests/test_health.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'framemeld.api_main'`
 
 - [ ] **Step 9: Write the minimal app**
@@ -308,7 +335,7 @@ async def health() -> dict[str, str]:
 
 - [ ] **Step 10: Run the test to verify it passes**
 
-Run: `uv run pytest tests/test_health.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_health.py -v`
 Expected: PASS
 
 - [ ] **Step 11: Start Postgres and confirm it is healthy**
@@ -325,7 +352,7 @@ Expected: the `postgres` service shows `healthy`.
 
 ```bash
 cd /f/FrameMeld
-git add .gitignore .env.example docker-compose.yml services/backend
+git add .gitignore .env.example docker-compose.yml environment.yml services/backend
 git commit -m "feat: scaffold backend with health endpoint and Postgres"
 ```
 
@@ -453,7 +480,7 @@ test-schema fixture."""
 
 - [ ] **Step 5: Run the existing test suite to confirm nothing broke**
 
-Run: `uv run pytest -v`
+Run: `conda run --no-capture-output -n framemeld pytest -v`
 Expected: PASS (`test_health_returns_ok`). The `db` and `client` fixtures are unused so far but must import cleanly.
 
 - [ ] **Step 6: Commit**
@@ -524,7 +551,7 @@ def test_list_order_is_significant():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/test_hashing.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_hashing.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'framemeld.hashing'`
 
 - [ ] **Step 3: Write the implementation**
@@ -559,7 +586,7 @@ def canonical_hash(payload: dict[str, Any]) -> str:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/test_hashing.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_hashing.py -v`
 Expected: PASS, 7 tests
 
 - [ ] **Step 5: Commit**
@@ -620,7 +647,7 @@ def test_malformed_hash_returns_false_rather_than_raising():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/test_passwords.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_passwords.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'framemeld.auth'`
 
 - [ ] **Step 3: Write the implementation**
@@ -647,7 +674,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/test_passwords.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_passwords.py -v`
 Expected: PASS, 5 tests
 
 - [ ] **Step 5: Commit**
@@ -727,7 +754,7 @@ async def test_session_links_to_user(db):
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `uv run pytest tests/test_models_user.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_models_user.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'framemeld.models.user'`
 
 - [ ] **Step 3: Write the models**
@@ -798,14 +825,14 @@ __all__ = ["Session", "User"]
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `uv run pytest tests/test_models_user.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_models_user.py -v`
 Expected: PASS, 3 tests
 
 - [ ] **Step 6: Initialise Alembic**
 
 ```bash
 cd /f/FrameMeld/services/backend
-uv run alembic init -t async migrations
+conda run --no-capture-output -n framemeld alembic init -t async migrations
 ```
 
 - [ ] **Step 7: Point Alembic at the app config**
@@ -832,8 +859,8 @@ Delete the `target_metadata = None` line that `alembic init` generated.
 - [ ] **Step 8: Generate and apply the migration**
 
 ```bash
-uv run alembic revision --autogenerate -m "users and sessions"
-uv run alembic upgrade head
+conda run --no-capture-output -n framemeld alembic revision --autogenerate -m "users and sessions"
+conda run --no-capture-output -n framemeld alembic upgrade head
 ```
 
 - [ ] **Step 9: Verify the tables exist**
@@ -960,7 +987,7 @@ async def test_two_sessions_for_one_user_are_independent(db):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/test_sessions.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_sessions.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'framemeld.auth.sessions'`
 
 - [ ] **Step 3: Write the implementation**
@@ -1028,7 +1055,7 @@ async def revoke_session(db: DbSession, raw_token: str) -> None:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/test_sessions.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_sessions.py -v`
 Expected: PASS, 8 tests
 
 - [ ] **Step 5: Commit**
@@ -1144,7 +1171,7 @@ async def test_logout_invalidates_the_session(client):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/test_auth_api.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_auth_api.py -v`
 Expected: FAIL — every request returns 404, because no `/auth` routes are registered yet.
 
 - [ ] **Step 3: Write the current_user dependency**
@@ -1287,7 +1314,7 @@ app.include_router(auth_router)
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/test_auth_api.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_auth_api.py -v`
 Expected: PASS, 10 tests
 
 - [ ] **Step 7: Add a login helper to conftest for later tasks**
@@ -1310,7 +1337,7 @@ async def logged_in(client) -> AsyncClient:
 
 - [ ] **Step 8: Run the full suite**
 
-Run: `uv run pytest -v`
+Run: `conda run --no-capture-output -n framemeld pytest -v`
 Expected: PASS, all tests
 
 - [ ] **Step 9: Commit**
@@ -1408,7 +1435,7 @@ async def test_deleting_a_meld_cascades_to_its_story(db):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/test_models_meld.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_models_meld.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'framemeld.models.meld'`
 
 - [ ] **Step 3: Write the models**
@@ -1530,15 +1557,15 @@ __all__ = [
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/test_models_meld.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_models_meld.py -v`
 Expected: PASS, 4 tests
 
 - [ ] **Step 6: Generate and apply the migration**
 
 ```bash
 cd /f/FrameMeld/services/backend
-uv run alembic revision --autogenerate -m "melds and stories"
-uv run alembic upgrade head
+conda run --no-capture-output -n framemeld alembic revision --autogenerate -m "melds and stories"
+conda run --no-capture-output -n framemeld alembic upgrade head
 ```
 
 - [ ] **Step 7: Commit**
@@ -1723,7 +1750,7 @@ async def test_save_story_returns_none_for_another_users_meld(db):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/test_melds_service.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_melds_service.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'framemeld.melds'`
 
 - [ ] **Step 3: Write the service**
@@ -1815,7 +1842,7 @@ async def save_story(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/test_melds_service.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_melds_service.py -v`
 Expected: PASS, 13 tests
 
 - [ ] **Step 5: Commit**
@@ -1991,7 +2018,7 @@ async def test_save_story_returns_404_for_another_users_meld(client):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/test_melds_api.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_melds_api.py -v`
 Expected: FAIL — every request returns 404, because no `/melds` routes are registered.
 
 - [ ] **Step 3: Write the schemas**
@@ -2137,12 +2164,12 @@ app.include_router(melds_router)
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/test_melds_api.py -v`
+Run: `conda run --no-capture-output -n framemeld pytest tests/test_melds_api.py -v`
 Expected: PASS, 16 tests
 
 - [ ] **Step 7: Run the full suite and the linter**
 
-Run: `uv run pytest -v && uv run ruff check src tests`
+Run: `conda run --no-capture-output -n framemeld pytest -v && conda run --no-capture-output -n framemeld ruff check src tests`
 Expected: all tests PASS, ruff reports no errors.
 
 - [ ] **Step 8: Commit**
@@ -2297,7 +2324,7 @@ export default function Home() {
 In one terminal:
 
 ```bash
-cd /f/FrameMeld/services/backend && uv run uvicorn framemeld.api_main:app --reload --port 8000
+cd /f/FrameMeld/services/backend && conda run --no-capture-output -n framemeld uvicorn framemeld.api_main:app --reload --port 8000
 ```
 
 In another:
@@ -2891,7 +2918,7 @@ This is the milestone's definition of done, so run it as a single clean pass:
 
 - [ ] **Step 5: Run the full backend suite one more time**
 
-Run: `cd /f/FrameMeld/services/backend && uv run pytest -v && uv run ruff check src tests`
+Run: `cd /f/FrameMeld/services/backend && conda run --no-capture-output -n framemeld pytest -v && conda run --no-capture-output -n framemeld ruff check src tests`
 Expected: all tests PASS, ruff clean.
 
 - [ ] **Step 6: Commit**
@@ -2942,7 +2969,7 @@ and find it intact on return. No AI calls yet — those start in M2.
 
 ## Running locally
 
-Requires Docker, Python 3.12+ with `uv`, and Node 20+.
+Requires Docker, conda (miniconda is fine), and Node 20+.
 
 ```bash
 cp .env.example .env
@@ -2950,9 +2977,10 @@ docker compose up -d
 docker compose exec postgres createdb -U framemeld framemeld_test  # once
 
 cd services/backend
-uv venv && uv pip install -e ".[dev]"
-uv run alembic upgrade head
-uv run uvicorn framemeld.api_main:app --reload --port 8000
+conda env create -f environment.yml   # once; creates the `framemeld` env
+conda run --no-capture-output -n framemeld pip install -e ".[dev]"
+conda run --no-capture-output -n framemeld alembic upgrade head
+conda run --no-capture-output -n framemeld uvicorn framemeld.api_main:app --reload --port 8000
 
 # in a second terminal
 cd apps/web && npm install && npm run dev
@@ -2963,7 +2991,7 @@ Then open <http://localhost:3000>. API docs are at <http://localhost:8000/docs>.
 ## Tests
 
 ```bash
-cd services/backend && uv run pytest -v && uv run ruff check src tests
+cd services/backend && conda run --no-capture-output -n framemeld pytest -v && conda run --no-capture-output -n framemeld ruff check src tests
 ```
 ````
 
@@ -2990,8 +3018,8 @@ git commit -m "docs: document M1 setup and status"
 From spec §9. All must hold before M2 begins.
 
 - [ ] A user signs up, creates a Meld, types a story, closes the tab, and finds the text intact on return.
-- [ ] `uv run pytest` passes — 67 tests: health 1, hashing 7, passwords 5, user models 3, sessions 8, auth API 10, meld models 4, meld service 13, meld API 16.
-- [ ] `uv run ruff check src tests` is clean.
+- [ ] `conda run --no-capture-output -n framemeld pytest` passes — 67 tests: health 1, hashing 7, passwords 5, user models 3, sessions 8, auth API 10, meld models 4, meld service 13, meld API 16.
+- [ ] `conda run --no-capture-output -n framemeld ruff check src tests` is clean.
 - [ ] A logged-out request to any `/melds` endpoint returns 401.
 - [ ] A request for another user's Meld returns **404**, not 403.
 - [ ] Deleting a Meld sets `deleted_at` and leaves the row in the table.
