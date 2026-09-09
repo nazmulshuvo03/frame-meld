@@ -1229,6 +1229,24 @@ async def test_logout_invalidates_the_session(client):
 
     after = await client.get("/auth/me")
     assert after.status_code == 401
+
+
+async def test_logout_with_a_forged_cookie_returns_204_not_500(client):
+    """Logout calls revoke_session with whatever cookie the client presents.
+    A stale or forged token must be a silent no-op. Without this test, a
+    refactor of revoke_session to scalar_one() would turn every stale
+    cookie into a 500 and the suite would stay green."""
+    client.cookies.set("framemeld_session", "not-a-real-token")
+
+    response = await client.post("/auth/logout")
+    assert response.status_code == 204
+
+
+async def test_logout_without_a_cookie_returns_204(client):
+    """A client with no session cookie at all must not get a 500 — the
+    raw token would be None, and None.encode() would raise."""
+    response = await client.post("/auth/logout")
+    assert response.status_code == 204
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1377,7 +1395,7 @@ app.include_router(auth_router)
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `conda run --no-capture-output -n framemeld pytest tests/test_auth_api.py -v`
-Expected: PASS, 10 tests
+Expected: PASS, 12 tests
 
 - [ ] **Step 7: Add a login helper to conftest for later tasks**
 
@@ -3096,7 +3114,7 @@ git commit -m "docs: document M1 setup and status"
 From spec §9. All must hold before M2 begins.
 
 - [ ] A user signs up, creates a Meld, types a story, closes the tab, and finds the text intact on return.
-- [ ] `conda run --no-capture-output -n framemeld pytest` passes — 69 tests: health 1, hashing 9, passwords 5, user models 3, sessions 8, auth API 10, meld models 4, meld service 13, meld API 16.
+- [ ] `conda run --no-capture-output -n framemeld pytest` passes — 71 tests: health 1, hashing 9, passwords 5, user models 3, sessions 8, auth API 12, meld models 4, meld service 13, meld API 16.
 - [ ] `conda run --no-capture-output -n framemeld ruff check src tests` is clean.
 - [ ] A logged-out request to any `/melds` endpoint returns 401.
 - [ ] A request for another user's Meld returns **404**, not 403.
