@@ -77,11 +77,20 @@ async def client(db) -> AsyncGenerator[AsyncClient, None]:
 @pytest.fixture
 async def logged_in(client) -> AsyncClient:
     """A client that has signed up and logged in. Meld tests need an
-    authenticated caller for every request, so this keeps them readable."""
-    await client.post(
+    authenticated caller for every request, so this keeps them readable.
+
+    Both calls are asserted: a silent failure here would hand every
+    dependent test an unauthenticated client, and they would fail with
+    confusing 401s far from the actual cause.
+    """
+    signup = await client.post(
         "/auth/signup", json={"email": "owner@example.com", "password": "hunter2hunter2"}
     )
-    await client.post(
+    assert signup.status_code == 201, signup.text
+
+    login = await client.post(
         "/auth/login", json={"email": "owner@example.com", "password": "hunter2hunter2"}
     )
+    assert login.status_code == 200, login.text
+
     return client

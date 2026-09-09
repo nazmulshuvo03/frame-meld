@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
 from framemeld.auth.deps import CurrentUser
@@ -48,7 +49,16 @@ async def signup(credentials: Credentials, db: Db) -> User:
 
     user = User(email=credentials.email, password_hash=hash_password(credentials.password))
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Two concurrent signups for the same address both passed the check
+        # above. The unique index is the real guard; convert the resulting
+        # error into the same 409 the sequential path returns.
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
+        ) from None
     await db.refresh(user)
     return user
 
@@ -61,7 +71,12 @@ async def login(credentials: Credentials, response: Response, db: Db) -> User:
     user = result.scalar_one_or_none()
 
     # One error for both "no such user" and "wrong password", so the
-    # response cannot be used to enumerate registered emails.
+    # response body cannot be used to enumerate registered emails.
+    # Note the response *time* still can: argon2 only runs when a user
+    # matched, so a wrong-password login is measurably slower than an
+    # unknown-email one. Signup's 409 already reveals the same fact, so
+    # this is accepted for M1 — but if signup ever stops enumerating,
+    # this needs a dummy-hash verify on the user-is-None path.
     if user is None or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
