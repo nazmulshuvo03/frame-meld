@@ -39,7 +39,7 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
     [id],
   );
 
-  const { status } = useAutosave({ value: text, onSave, delayMs: 800 });
+  const { status } = useAutosave({ value: text, onSave, delayMs: 800, enabled: loaded });
 
   if (!loaded || meld === null) {
     return <main className="p-8 text-sm text-neutral-500">Loading…</main>;
