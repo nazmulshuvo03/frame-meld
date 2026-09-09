@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MeldCard } from "@/components/MeldCard";
 import {
+  ApiError,
   createMeld,
   deleteMeld,
   listMelds,
@@ -15,12 +16,23 @@ import {
 export default function MeldsPage() {
   const router = useRouter();
   const [melds, setMelds] = useState<MeldSummary[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       setMelds(await listMelds());
-    } catch {
-      router.replace("/login");
+      setLoadError(null);
+    } catch (err) {
+      // Only a 401 means the session is gone. Any other failure — the API
+      // unreachable, a 500 — must not masquerade as a logout, or a
+      // transient blip bounces an authenticated user to a login page that
+      // will also fail.
+      if (err instanceof ApiError && err.status === 401) {
+        router.replace("/login");
+      } else {
+        setLoadError("Couldn't load your Melds. Check your connection and reload.");
+      }
     }
   }, [router]);
 
@@ -29,23 +41,43 @@ export default function MeldsPage() {
   }, [refresh]);
 
   async function onNewMeld() {
-    const created = await createMeld();
-    router.push(`/meld/${created.id}`);
+    if (creating) return;
+    setCreating(true);
+    try {
+      const created = await createMeld();
+      router.push(`/meld/${created.id}`);
+    } catch {
+      alert("Couldn't create a Meld. Please try again.");
+      setCreating(false);
+    }
   }
 
   async function onRename(id: string, title: string) {
-    await renameMeld(id, title);
-    await refresh();
+    try {
+      await renameMeld(id, title);
+      await refresh();
+    } catch {
+      alert("Couldn't rename this Meld. Please try again.");
+    }
   }
 
   async function onDelete(id: string) {
     if (!confirm("Delete this Meld? You can't undo this from the app.")) return;
-    await deleteMeld(id);
-    await refresh();
+    try {
+      await deleteMeld(id);
+      await refresh();
+    } catch {
+      alert("Couldn't delete this Meld. Please try again.");
+    }
   }
 
   async function onLogout() {
-    await logout();
+    try {
+      await logout();
+    } catch {
+      alert("Couldn't log out. Please try again.");
+      return;
+    }
     router.replace("/login");
   }
 
@@ -56,7 +88,8 @@ export default function MeldsPage() {
         <div className="flex items-center gap-4">
           <button
             onClick={onNewMeld}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white"
+            disabled={creating}
+            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
           >
             New Meld
           </button>
@@ -66,12 +99,22 @@ export default function MeldsPage() {
         </div>
       </header>
 
-      {melds === null && <p className="text-sm text-neutral-500">Loading…</p>}
+      {loadError && (
+        <p role="alert" className="mb-6 text-sm text-red-600">
+          {loadError}
+        </p>
+      )}
+
+      {melds === null && !loadError && <p className="text-sm text-neutral-500">Loading…</p>}
 
       {melds !== null && melds.length === 0 && (
         <div className="rounded border border-dashed border-neutral-300 p-12 text-center">
           <p className="mb-4 text-neutral-600">You haven&apos;t started a Meld yet.</p>
-          <button onClick={onNewMeld} className="rounded bg-neutral-900 px-4 py-2 text-sm text-white">
+          <button
+            onClick={onNewMeld}
+            disabled={creating}
+            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+          >
             Write your first story
           </button>
         </div>

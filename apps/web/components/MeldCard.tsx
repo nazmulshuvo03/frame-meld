@@ -40,6 +40,7 @@ export function MeldCard({
         {editing ? (
           <input
             autoFocus
+            aria-label="Meld title"
             value={draftTitle}
             onChange={(e) => setDraftTitle(e.target.value)}
             onBlur={commitRename}
@@ -64,7 +65,15 @@ export function MeldCard({
       </div>
 
       <div className="flex shrink-0 gap-3 text-sm">
-        <button onClick={() => setEditing(true)} className="text-neutral-600 hover:underline">
+        <button
+          onClick={() => {
+            // Reset the draft before opening. Without this, a rename that
+            // failed to persist reappears here as though it had saved.
+            setDraftTitle(meld.title);
+            setEditing(true);
+          }}
+          className="text-neutral-600 hover:underline"
+        >
           Rename
         </button>
         <button onClick={() => onDelete(meld.id)} className="text-red-600 hover:underline">
