@@ -15,6 +15,10 @@ class MeldRename(BaseModel):
 class StorySave(BaseModel):
     # No min_length: clearing the editor is a valid save.
     text: str = Field(max_length=200_000)
+    # The content_hash the client believes it is editing. Omitted on the
+    # first save after a load; sent on every save after that, so a second
+    # tab cannot silently overwrite the first.
+    if_content_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class StoryOut(BaseModel):

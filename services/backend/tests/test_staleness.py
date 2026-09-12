@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from framemeld.melds import service as melds_service
+from framemeld.models.meld import Story
 from framemeld.models.script import ArtifactState, CameraAngle, DialogueKind, Scene, Shot
 from framemeld.models.user import User
 from framemeld.script.hashes import (
@@ -167,12 +168,19 @@ async def test_scenes_of_other_melds_are_untouched(db):
 
 
 async def test_a_soft_deleted_meld_is_ignored(db):
-    """The story is changed *before* the delete, so there is real work the
-    engine would do if the guard were missing. Without the edit this test
-    passes with the guard removed, which is how it shipped."""
+    """The story is changed before the engine runs, so there is real work it
+    would do if the deleted_at guard were missing.
+
+    The change is made on the row rather than through save_story, because
+    save_story now runs the engine itself — going through it would leave the
+    rows already stale and this assertion would prove nothing.
+    """
     user, meld, _ = await _meld_with_script(db, story_text="Original.")
-    await melds_service.save_story(db, user.id, meld.id, "Changed.")
     await melds_service.soft_delete_meld(db, user.id, meld.id)
+
+    story = (await db.execute(select(Story).where(Story.meld_id == meld.id))).scalar_one()
+    story.content_hash = content_hash_for_story("Changed.")
+    await db.flush()
 
     report = await recompute_staleness(db, meld.id)
 
@@ -181,3 +189,18 @@ async def test_a_soft_deleted_meld_is_ignored(db):
     assert all(
         scene.state is ArtifactState.FRESH for scene in (await db.execute(select(Scene))).scalars()
     )
+
+
+async def test_saving_the_story_recomputes_staleness_without_being_asked(db):
+    """The API must not depend on a caller remembering to run the engine."""
+    from sqlalchemy import select
+
+    from framemeld.melds import service as melds_service
+    from framemeld.models.script import ArtifactState, Shot
+
+    user, meld, _ = await _meld_with_script(db)
+    await melds_service.save_story(db, user.id, meld.id, "Something quite different.")
+
+    db.expire_all()
+    states = {shot.state for shot in (await db.execute(select(Shot))).scalars()}
+    assert states == {ArtifactState.STALE}

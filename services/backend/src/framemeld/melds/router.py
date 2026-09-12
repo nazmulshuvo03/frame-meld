@@ -32,6 +32,14 @@ def _not_found() -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meld not found")
 
 
+def _conflict() -> HTTPException:
+    """A fresh instance per raise — see _not_found."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="This Meld was edited somewhere else. Reload to get the latest version.",
+    )
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=MeldOut)
 async def create_meld(payload: MeldCreate, user: CurrentUser, db: Db):
     meld = await service.create_meld(db, user.id, payload.title)
@@ -70,7 +78,14 @@ async def delete_meld(meld_id: uuid.UUID, user: CurrentUser, db: Db) -> None:
 
 @router.put("/{meld_id}/story", response_model=StoryOut)
 async def save_story(meld_id: uuid.UUID, payload: StorySave, user: CurrentUser, db: Db):
-    story = await service.save_story(db, user.id, meld_id, payload.text)
+    try:
+        story = await service.save_story(
+            db, user.id, meld_id, payload.text, payload.if_content_hash
+        )
+    except service.StoryConflict:
+        # No commit: the session is rolled back by get_session's context
+        # manager, so nothing the refused save touched reaches the database.
+        raise _conflict() from None
     if story is None:
         raise _not_found()
     await db.commit()

@@ -7,6 +7,16 @@ from sqlalchemy.orm import selectinload
 
 from framemeld.models.meld import Meld, Story
 from framemeld.script.hashes import content_hash_for_story
+from framemeld.staleness import recompute_staleness
+
+
+class StoryConflict(Exception):
+    """The caller's `if_content_hash` no longer matches what is stored.
+
+    An exception rather than a sentinel return, because the caller has three
+    outcomes to tell apart — saved, no such Meld, someone else got there
+    first — and a `Story | None` return can only carry two.
+    """
 
 
 async def create_meld(db: DbSession, user_id: uuid.UUID, title: str) -> Meld:
@@ -77,7 +87,11 @@ async def soft_delete_meld(db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID
 
 
 async def save_story(
-    db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID, text: str
+    db: DbSession,
+    user_id: uuid.UUID,
+    meld_id: uuid.UUID,
+    text: str,
+    if_content_hash: str | None = None,
 ) -> Story | None:
     meld = await get_meld(db, user_id, meld_id)
     if meld is None:
@@ -90,6 +104,13 @@ async def save_story(
     if story is None:
         return None
 
+    # Checked after the ownership funnel, never before: a precondition
+    # failure on someone else's Meld would confirm that Meld exists.
+    # Optional because the first save after a page load has nothing to
+    # compare against yet.
+    if if_content_hash is not None and if_content_hash != story.content_hash:
+        raise StoryConflict
+
     now = datetime.now(UTC)
     story.text = text
     story.content_hash = content_hash_for_story(text)
@@ -100,4 +121,9 @@ async def save_story(
     # creation date.
     meld.updated_at = now
     await db.flush()
+
+    # The story is the root of the dependency graph, so its edit is the one
+    # event that can invalidate anything downstream. Run here rather than in
+    # the router so no future caller can forget.
+    await recompute_staleness(db, meld_id)
     return story
