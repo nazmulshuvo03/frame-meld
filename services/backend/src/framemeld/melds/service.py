@@ -5,15 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 from sqlalchemy.orm import selectinload
 
-from framemeld.hashing import canonical_hash
 from framemeld.models.meld import Meld, Story
-
-
-def story_hash(text: str) -> str:
-    """The story is the root of the dependency graph, so this value is what
-    every downstream input_hash is computed *from*. It is itself a content
-    hash — nothing generated the story."""
-    return canonical_hash({"kind": "story", "text": text})
+from framemeld.script.hashes import content_hash_for_story
 
 
 async def create_meld(db: DbSession, user_id: uuid.UUID, title: str) -> Meld:
@@ -33,7 +26,7 @@ async def create_meld(db: DbSession, user_id: uuid.UUID, title: str) -> Meld:
 
     # Every Meld has a Story from birth, so the editor never has to handle
     # a missing one.
-    db.add(Story(meld_id=meld.id, text="", content_hash=story_hash("")))
+    db.add(Story(meld_id=meld.id, text="", content_hash=content_hash_for_story("")))
     await db.flush()
     return meld
 
@@ -99,7 +92,7 @@ async def save_story(
 
     now = datetime.now(UTC)
     story.text = text
-    story.content_hash = story_hash(text)
+    story.content_hash = content_hash_for_story(text)
     story.updated_at = now
     # Editing a Meld's story updates the Meld. The dashboard renders
     # "updated {meld.updated_at}" on every card, so without this a user

@@ -9,10 +9,10 @@ from framemeld.melds.service import (
     rename_meld,
     save_story,
     soft_delete_meld,
-    story_hash,
 )
 from framemeld.models.meld import Meld, MeldStage
 from framemeld.models.user import User
+from framemeld.script.hashes import content_hash_for_story
 
 
 async def _make_user(db, email) -> User:
@@ -32,7 +32,7 @@ async def test_create_meld_also_creates_an_empty_story(db):
     assert meld.stage == MeldStage.STORY
     assert meld.story is not None
     assert meld.story.text == ""
-    assert meld.story.content_hash == story_hash("")
+    assert meld.story.content_hash == content_hash_for_story("")
 
 
 async def test_list_melds_returns_newest_first(db):
@@ -135,7 +135,7 @@ async def test_save_story_stores_the_text_and_its_hash(db):
     db.expire_all()
     reloaded = await get_meld(db, user_id, meld_id)
     assert reloaded.story.text == "Once upon a time"
-    assert reloaded.story.content_hash == story_hash("Once upon a time")
+    assert reloaded.story.content_hash == content_hash_for_story("Once upon a time")
 
 
 async def test_save_story_is_idempotent_for_unchanged_text(db):

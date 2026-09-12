@@ -62,6 +62,23 @@ async def db(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest.fixture
+def db_scene_factory():
+    from framemeld.models.script import Scene
+
+    def make(**overrides):
+        fields = {
+            "order_index": 0,
+            "heading": "INT. KITCHEN - NIGHT",
+            "summary": "Elena finds the letter.",
+            "location": "Kitchen",
+            "time_of_day": "night",
+        }
+        return Scene(**(fields | overrides))
+
+    return make
+
+
+@pytest.fixture
 async def fake_redis():
     """A real Redis implementation, in memory.
 
