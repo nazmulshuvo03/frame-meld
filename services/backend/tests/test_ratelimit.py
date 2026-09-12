@@ -37,11 +37,22 @@ async def test_at_the_limit_reports_a_wait(fake_redis):
 async def test_the_window_does_not_slide(fake_redis):
     """The TTL is set once, by the first failure. A later failure must not
     extend it, or a persistent attacker could hold a victim locked out
-    indefinitely."""
+    indefinitely.
+
+    The window is shrunk to an unmistakable value between the two calls:
+    with `nx=True` the second EXPIRE is a no-op and the TTL stays at 5, and
+    without it the TTL jumps back to 900. Comparing two back-to-back 900s
+    instead would round to equal either way and assert nothing.
+    """
     await record_failure(fake_redis, "k", 900)
-    first_ttl = await fake_redis.ttl("k")
+    await fake_redis.expire("k", 5)
+
     await record_failure(fake_redis, "k", 900)
-    assert await fake_redis.ttl("k") <= first_ttl
+
+    assert 0 < await fake_redis.ttl("k") <= 5
+    # And the counter still moved, so we know the pipeline ran at all and
+    # the TTL assertion is not passing because nothing happened.
+    assert await fake_redis.get("k") == "2"
 
 
 async def test_clear_resets_the_counter(fake_redis):
