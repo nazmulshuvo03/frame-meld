@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 
+import fakeredis.aioredis
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -11,6 +12,7 @@ import framemeld.models  # noqa: F401
 from framemeld.api_main import app
 from framemeld.config import settings
 from framemeld.db import Base, get_session
+from framemeld.redis_client import get_redis
 
 
 @pytest.fixture(scope="session")
@@ -60,17 +62,34 @@ async def db(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest.fixture
-async def client(db) -> AsyncGenerator[AsyncClient, None]:
+async def fake_redis():
+    """A real Redis implementation, in memory.
+
+    fakeredis rather than a hand-rolled double because the limiter depends
+    on exact server semantics — pipelines, and EXPIRE's nx flag in
+    particular — that a stub would assert nothing about.
+    """
+    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    try:
+        yield client
+    finally:
+        await client.aclose()
+
+
+@pytest.fixture
+async def client(db, fake_redis) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_session():
         yield db
 
     app.dependency_overrides[get_session] = override_get_session
+    app.dependency_overrides[get_redis] = lambda: fake_redis
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
     finally:
         app.dependency_overrides.pop(get_session, None)
+        app.dependency_overrides.pop(get_redis, None)
 
 
 @pytest.fixture

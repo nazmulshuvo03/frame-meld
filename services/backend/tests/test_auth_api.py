@@ -95,3 +95,65 @@ async def test_logout_without_a_cookie_returns_204(client):
     raw token would be None, and None.encode() would raise."""
     response = await client.post("/auth/logout")
     assert response.status_code == 204
+
+
+async def _signup_rl(client):
+    response = await client.post(
+        "/auth/signup", json={"email": "rl@example.com", "password": "hunter2hunter2"}
+    )
+    assert response.status_code == 201, response.text
+
+
+async def _bad_login(client, email="rl@example.com"):
+    return await client.post("/auth/login", json={"email": email, "password": "wrongwrong"})
+
+
+async def test_repeated_failed_logins_are_rate_limited(client):
+    await _signup_rl(client)
+
+    for attempt in range(10):
+        assert (await _bad_login(client)).status_code == 401, f"attempt {attempt}"
+
+    blocked = await _bad_login(client)
+    assert blocked.status_code == 429
+    assert int(blocked.headers["Retry-After"]) > 0
+
+
+async def test_the_limit_blocks_the_correct_password_too(client):
+    """A limiter that only rejects wrong passwords protects nothing — an
+    attacker reads the right one straight off the response code."""
+    await _signup_rl(client)
+    for _ in range(10):
+        await _bad_login(client)
+
+    blocked = await client.post(
+        "/auth/login", json={"email": "rl@example.com", "password": "hunter2hunter2"}
+    )
+    assert blocked.status_code == 429
+
+
+async def test_a_successful_login_clears_the_email_counter(client):
+    await _signup_rl(client)
+    for _ in range(9):
+        await _bad_login(client)
+
+    good = await client.post(
+        "/auth/login", json={"email": "rl@example.com", "password": "hunter2hunter2"}
+    )
+    assert good.status_code == 200
+
+    # The budget is back: nine more failures would have tripped the limit
+    # had the counter survived.
+    for attempt in range(9):
+        assert (await _bad_login(client)).status_code == 401, f"attempt {attempt}"
+
+
+async def test_the_limit_is_per_email(client):
+    await _signup_rl(client)
+    for _ in range(10):
+        await _bad_login(client)
+
+    other = await _bad_login(client, email="someone-else@example.com")
+    # Still 401 rather than 429: the first address's budget is exhausted but
+    # this one has its own, and the per-IP budget (20) has not tripped yet.
+    assert other.status_code == 401

@@ -21,6 +21,27 @@ class Settings(BaseSettings):
     session_cookie_name: str = "framemeld_session"
     session_ttl_days: int = 30
 
+    redis_url: str = "redis://localhost:6379/0"
+
+    # Failed logins only. A successful login clears the per-email counter but
+    # deliberately leaves the per-IP one alone: owning one valid account must
+    # not reset an attacker's budget for spraying others.
+    login_max_attempts_per_email: int = 10
+    login_max_attempts_per_ip: int = 20
+    login_window_seconds: int = 900
+
+    # "stub" is the default so the app and the test suite both run with no
+    # API key and no network. Set LLM_PROVIDER=openrouter in .env to use the
+    # real one.
+    llm_provider: str = "stub"
+    llm_model: str = "qwen/qwen3-next-80b-a3b-instruct:free"
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+
+    # FastAPI's interactive docs enumerate every endpoint and schema to
+    # anonymous callers. Fine locally, not on a public host.
+    docs_enabled: bool = True
+
     # NoDecode switches off pydantic-settings' default JSON parsing for
     # complex types. Without it, CORS_ORIGINS would have to be written as a
     # JSON array in .env, and the validator below could never run — source
