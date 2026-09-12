@@ -10,8 +10,9 @@ from framemeld.models.meld import Meld, Story
 
 
 def story_hash(text: str) -> str:
-    """The story is the root of the dependency graph, so its hash is the
-    seed for every downstream input_hash in M2 onwards."""
+    """The story is the root of the dependency graph, so this value is what
+    every downstream input_hash is computed *from*. It is itself a content
+    hash — nothing generated the story."""
     return canonical_hash({"kind": "story", "text": text})
 
 
@@ -32,7 +33,7 @@ async def create_meld(db: DbSession, user_id: uuid.UUID, title: str) -> Meld:
 
     # Every Meld has a Story from birth, so the editor never has to handle
     # a missing one.
-    db.add(Story(meld_id=meld.id, text="", input_hash=story_hash("")))
+    db.add(Story(meld_id=meld.id, text="", content_hash=story_hash("")))
     await db.flush()
     return meld
 
@@ -98,7 +99,7 @@ async def save_story(
 
     now = datetime.now(UTC)
     story.text = text
-    story.input_hash = story_hash(text)
+    story.content_hash = story_hash(text)
     story.updated_at = now
     # Editing a Meld's story updates the Meld. The dashboard renders
     # "updated {meld.updated_at}" on every card, so without this a user

@@ -12,7 +12,6 @@ from framemeld.melds.schemas import (
     MeldDetail,
     MeldOut,
     MeldRename,
-    MeldSummary,
     StoryOut,
     StorySave,
 )
@@ -40,7 +39,7 @@ async def create_meld(payload: MeldCreate, user: CurrentUser, db: Db):
     return meld
 
 
-@router.get("", response_model=list[MeldSummary])
+@router.get("", response_model=list[MeldOut])
 async def list_melds(user: CurrentUser, db: Db):
     return await service.list_melds(db, user.id)
 

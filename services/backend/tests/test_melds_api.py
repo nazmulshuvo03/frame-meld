@@ -47,7 +47,7 @@ async def test_get_meld_includes_the_story(logged_in, db):
     body = response.json()
     assert body["title"] == "With Story"
     assert body["story"]["text"] == ""
-    assert len(body["story"]["input_hash"]) == 64
+    assert len(body["story"]["content_hash"]) == 64
 
 
 async def test_get_meld_returns_404_for_an_unknown_id(logged_in):
@@ -130,13 +130,13 @@ async def test_save_story_persists_the_text(logged_in, db):
     assert reloaded.json()["story"]["text"] == "It was a dark and stormy night."
 
 
-async def test_save_story_changes_the_input_hash(logged_in):
+async def test_save_story_changes_the_content_hash(logged_in):
     created = (await logged_in.post("/melds", json={"title": "Hashing"})).json()
 
     first = (await logged_in.put(f"/melds/{created['id']}/story", json={"text": "one"})).json()
     second = (await logged_in.put(f"/melds/{created['id']}/story", json={"text": "two"})).json()
 
-    assert first["input_hash"] != second["input_hash"]
+    assert first["content_hash"] != second["content_hash"]
 
 
 async def test_save_story_accepts_an_empty_string(logged_in):

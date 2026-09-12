@@ -32,7 +32,7 @@ async def test_create_meld_also_creates_an_empty_story(db):
     assert meld.stage == MeldStage.STORY
     assert meld.story is not None
     assert meld.story.text == ""
-    assert meld.story.input_hash == story_hash("")
+    assert meld.story.content_hash == story_hash("")
 
 
 async def test_list_melds_returns_newest_first(db):
@@ -135,7 +135,7 @@ async def test_save_story_stores_the_text_and_its_hash(db):
     db.expire_all()
     reloaded = await get_meld(db, user_id, meld_id)
     assert reloaded.story.text == "Once upon a time"
-    assert reloaded.story.input_hash == story_hash("Once upon a time")
+    assert reloaded.story.content_hash == story_hash("Once upon a time")
 
 
 async def test_save_story_is_idempotent_for_unchanged_text(db):
@@ -146,12 +146,12 @@ async def test_save_story_is_idempotent_for_unchanged_text(db):
     user_id, meld_id = user.id, meld.id
 
     first = await save_story(db, user_id, meld_id, "unchanged")
-    first_hash = first.input_hash
+    first_hash = first.content_hash
     await save_story(db, user_id, meld_id, "unchanged")
 
     db.expire_all()
     reloaded = await get_meld(db, user_id, meld_id)
-    assert reloaded.story.input_hash == first_hash
+    assert reloaded.story.content_hash == first_hash
 
 
 async def test_save_story_changes_the_hash_when_the_text_changes(db):
@@ -160,12 +160,12 @@ async def test_save_story_changes_the_hash_when_the_text_changes(db):
     user_id, meld_id = user.id, meld.id
 
     first = await save_story(db, user_id, meld_id, "version one")
-    first_hash = first.input_hash
+    first_hash = first.content_hash
     await save_story(db, user_id, meld_id, "version two")
 
     db.expire_all()
     reloaded = await get_meld(db, user_id, meld_id)
-    assert reloaded.story.input_hash != first_hash
+    assert reloaded.story.content_hash != first_hash
 
 
 async def test_rename_meld_returns_none_for_another_users_meld(db):

@@ -32,10 +32,10 @@ async def test_story_is_one_to_one_with_meld(db):
     db.add(meld)
     await db.flush()
 
-    db.add(Story(meld_id=meld.id, text="Once upon a time", input_hash="abc"))
+    db.add(Story(meld_id=meld.id, text="Once upon a time", content_hash="abc"))
     await db.flush()
 
-    db.add(Story(meld_id=meld.id, text="A second story", input_hash="def"))
+    db.add(Story(meld_id=meld.id, text="A second story", content_hash="def"))
     with pytest.raises(IntegrityError):
         await db.flush()
 
@@ -77,7 +77,7 @@ async def test_deleting_a_meld_cascades_to_its_story(db):
     meld = Meld(user_id=user.id, title="Doomed")
     db.add(meld)
     await db.flush()
-    db.add(Story(meld_id=meld.id, text="text", input_hash="abc"))
+    db.add(Story(meld_id=meld.id, text="text", content_hash="abc"))
     await db.flush()
     meld_id = meld.id
 

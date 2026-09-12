@@ -2,11 +2,12 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from framemeld.db import Base
+from framemeld.models.columns import enum_column
 
 
 class MeldStage(enum.StrEnum):
@@ -29,34 +30,6 @@ class ModerationState(enum.StrEnum):
     FLAGGED = "flagged"
 
 
-def _enum_column(enum_cls: type[enum.StrEnum], constraint_name: str) -> Enum:
-    """A VARCHAR column with a named CHECK constraint over the enum's *values*.
-
-    All four arguments are load-bearing and each fails silently if omitted:
-
-    - `native_enum=False` avoids a Postgres native enum, which would need an
-      `ALTER TYPE` migration every time a member is added.
-    - `create_constraint=True` is required. SQLAlchemy 2.0 defaults it to
-      False, so `native_enum=False` on its own produces a bare, completely
-      unconstrained VARCHAR — no validation at any layer.
-    - `name` names the CHECK so a later migration can drop and recreate it.
-    - `values_callable` stores `'story'` rather than the member name
-      `'STORY'`, keeping the database consistent with the API and with the
-      values listed in the spec.
-
-    Later milestones add enums in other model files; move this to a shared
-    module at that point rather than copying it.
-    """
-    return Enum(
-        enum_cls,
-        native_enum=False,
-        length=20,
-        create_constraint=True,
-        name=constraint_name,
-        values_callable=lambda e: [member.value for member in e],
-    )
-
-
 class Meld(Base):
     __tablename__ = "melds"
 
@@ -68,15 +41,16 @@ class Meld(Base):
     )
     title: Mapped[str] = mapped_column(String(200))
 
-    # See _enum_column above for why all four Enum arguments are required.
+    # See framemeld.models.columns.enum_column for why all four Enum
+    # arguments are required.
     stage: Mapped[MeldStage] = mapped_column(
-        _enum_column(MeldStage, "meld_stage"), default=MeldStage.STORY
+        enum_column(MeldStage, "meld_stage"), default=MeldStage.STORY
     )
     status: Mapped[MeldStatus] = mapped_column(
-        _enum_column(MeldStatus, "meld_status"), default=MeldStatus.DRAFT
+        enum_column(MeldStatus, "meld_status"), default=MeldStatus.DRAFT
     )
     moderation_state: Mapped[ModerationState] = mapped_column(
-        _enum_column(ModerationState, "meld_moderation_state"),
+        enum_column(ModerationState, "meld_moderation_state"),
         default=ModerationState.PENDING,
     )
 
@@ -104,7 +78,10 @@ class Story(Base):
         PgUUID(as_uuid=True), ForeignKey("melds.id", ondelete="CASCADE"), unique=True, index=True
     )
     text: Mapped[str] = mapped_column(Text, default="")
-    input_hash: Mapped[str] = mapped_column(String(64))
+    # Renamed from input_hash in M2. A story has no generation behind it —
+    # the user wrote it — so what this holds has always been a hash of the
+    # row's own content. See the spec's §4.1 correction blockquote.
+    content_hash: Mapped[str] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

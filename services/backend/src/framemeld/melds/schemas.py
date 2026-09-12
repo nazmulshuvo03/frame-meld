@@ -21,7 +21,7 @@ class StoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     text: str
-    input_hash: str
+    content_hash: str
     updated_at: datetime
 
 
@@ -35,10 +35,6 @@ class MeldOut(BaseModel):
     aspect_ratio: str
     created_at: datetime
     updated_at: datetime
-
-
-class MeldSummary(MeldOut):
-    pass
 
 
 class MeldDetail(MeldOut):

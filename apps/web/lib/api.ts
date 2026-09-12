@@ -22,7 +22,7 @@ export type MeldSummary = {
   updated_at: string;
 };
 
-export type Story = { text: string; input_hash: string; updated_at: string };
+export type Story = { text: string; content_hash: string; updated_at: string };
 
 export type MeldDetail = MeldSummary & { story: Story | null };
 
