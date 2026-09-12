@@ -4,7 +4,6 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from framemeld.melds import service as melds_service
-from framemeld.models.meld import Meld
 from framemeld.models.script import ArtifactState, CameraAngle, DialogueKind, Scene, Shot
 from framemeld.models.user import User
 from framemeld.script.hashes import (
@@ -136,24 +135,49 @@ async def test_a_meld_with_no_script_reports_nothing(db):
 
 async def test_scenes_of_other_melds_are_untouched(db):
     user_a, meld_a, _ = await _meld_with_script(db)
-    _, _meld_b, scene_b = await _meld_with_script(db)
+    _, meld_b, scene_b = await _meld_with_script(db)
+    meld_b_id = meld_b.id
     scene_b_id = scene_b.id
 
     await melds_service.save_story(db, user_a.id, meld_a.id, "Changed.")
     await recompute_staleness(db, meld_a.id)
 
-    # scene_b_id captured above for the same reason as in
+    # meld_b_id / scene_b_id captured above for the same reason as in
     # test_rows_mid_generation_are_left_alone.
     db.expire_all()
     reloaded = (await db.execute(select(Scene).where(Scene.id == scene_b_id))).scalar_one()
     assert reloaded.state is ArtifactState.FRESH
 
+    # Shots are reached indirectly, through a join on Scene.meld_id -- the
+    # riskier half of the scoping, and untested until now: every other
+    # staleness test has only one Meld in scope, so a missing meld_id filter
+    # on the shots query would not fail anything above this line.
+    shots_b = (
+        (
+            await db.execute(
+                select(Shot)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .where(Scene.meld_id == meld_b_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert shots_b and all(shot.state is ArtifactState.FRESH for shot in shots_b)
+
 
 async def test_a_soft_deleted_meld_is_ignored(db):
-    """recompute_staleness is called from paths that already scoped the
-    Meld, but it must not resurrect work for a Meld the user deleted."""
-    user, meld, _ = await _meld_with_script(db)
+    """The story is changed *before* the delete, so there is real work the
+    engine would do if the guard were missing. Without the edit this test
+    passes with the guard removed, which is how it shipped."""
+    user, meld, _ = await _meld_with_script(db, story_text="Original.")
+    await melds_service.save_story(db, user.id, meld.id, "Changed.")
     await melds_service.soft_delete_meld(db, user.id, meld.id)
-    await db.execute(select(Meld))  # no-op; keeps the import used and the intent obvious
+
     report = await recompute_staleness(db, meld.id)
-    assert report.changed == 0
+
+    assert (report.stale_scenes, report.stale_shots, report.changed) == (0, 0, 0)
+    db.expire_all()
+    assert all(
+        scene.state is ArtifactState.FRESH for scene in (await db.execute(select(Scene))).scalars()
+    )

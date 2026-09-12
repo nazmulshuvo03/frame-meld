@@ -1,5 +1,5 @@
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from framemeld.config import settings
 from framemeld.hashing import canonical_hash
@@ -28,8 +28,12 @@ def _duration_at_column_scale(value: Decimal) -> str:
     two-place form. Hashing str(value) directly would make a shot's hash
     change across a flush-and-reload with nothing edited, and every shot
     would look modified the moment it was read back.
+
+    ROUND_HALF_UP rather than the default banker's rounding, because that is
+    what Postgres numeric does: Decimal("4.005") must hash as the 4.01 the
+    column will actually store, not the 4.00 an f-string would produce.
     """
-    return f"{value:.2f}"
+    return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def _optional_uuid(value: uuid.UUID | None) -> str | None:
