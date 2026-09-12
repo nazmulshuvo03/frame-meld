@@ -23,14 +23,22 @@ What's verified and how:
   returns 404 (not 403). Covered by `test_melds_api.py` /
   `test_melds_service.py`.
 - Deleting a Meld soft-deletes it (`deleted_at` is set; the row stays).
-- The story editor's autosave debounce (one save request per pause in
-  typing, not one per keystroke) is implemented in
-  `apps/web/lib/useAutosave.ts`. **It has not been driven through a real
-  browser in an automated session** — the debounce behavior is verified by
-  code review and a one-off simulation of the hook's decision logic that was
-  not retained in the repo, not by an actual person typing into the page.
-  Treat the end-to-end "type → close tab → reopen → text is there" claim as
-  plausible but not browser-verified.
+- The story editor's autosave has been **driven through a real browser** and
+  measured, not only reasoned about. In Chrome against a live stack:
+  - 38 keystrokes typed 35 ms apart produced **exactly one** `PUT
+    /melds/{id}/story` — the debounce collapses a burst rather than saving
+    per keystroke.
+  - Opening a Meld that already has text fires **no** save: the status stayed
+    empty for two seconds past the debounce window, so merely viewing a Meld
+    does not bump its `updated_at`.
+  - Text typed **200 ms before** a client-side navigation away — inside the
+    debounce, so the pending timer is cancelled by unmount — still reached
+    the database, via the unmount flush.
+  - Reloading the page returned the full text.
+
+  What is still not covered by any automated test: there is no frontend test
+  suite, so none of the above is guarded against regression. The checks above
+  were performed once, by hand, against the commit this README describes.
 
 ## Layout
 
