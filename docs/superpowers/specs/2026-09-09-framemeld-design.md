@@ -142,16 +142,29 @@ settlement, so it must be real, not estimated.
 **This is the central architectural bet.** It is cheap to build in from the start and
 near-impossible to retrofit.
 
-Every *generated* row carries these columns:
+**Two hashes, not one.** This distinction is load-bearing and the original
+version of this spec got it wrong — see the note at the end of this section.
+
+| Column | On which rows | Meaning |
+|---|---|---|
+| `content_hash` | every artifact a user can edit | SHA-256 of the canonical JSON of the artifact's **own current fields** — what it *says* right now |
+| `input_hash` | every *generated* artifact | SHA-256 of the canonical JSON of what **produced** it: the `content_hash` of each upstream artifact, plus the provider, model and params |
+
+Generated rows additionally carry:
 
 | Column | Meaning |
 |---|---|
-| `input_hash` | SHA-256 of the canonical JSON of everything that produced it: upstream artifacts' `input_hash` values, the prompt, the provider, the model, and the params |
 | `state` | `empty` / `generating` / `fresh` / `stale` / `failed` |
 | `provider`, `model` | what actually made it |
 | `params` (JSONB) | seed, resolution, guidance, etc. |
 | `credits_spent` | shown in the UI |
 | `asset_id` | the file in object storage |
+
+**Downstream depends on upstream's `content_hash`, never its `input_hash`.**
+That is the whole point. `input_hash` records provenance and does not change
+when a human edits the row; `content_hash` does. Wiring downstream to
+provenance would mean a user could rewrite a shot's prompt and its image
+would never be marked stale.
 
 Two properties fall out of this:
 
@@ -179,9 +192,24 @@ story ──> character ──> character_image
 shot_clip + audio_clip + music ──> render
 ```
 
-A `shot_image`'s hash includes the `input_hash` of every `character_image` it used as a
-reference. That is the link that catches "the character changed" — the case that
-otherwise silently ships a film where a face changes halfway through.
+A `shot_image`'s `input_hash` includes the **`content_hash`** of every
+`character_image` it used as a reference, and of the `shot` it depicts. That is the link
+that catches "the character changed" — the case that otherwise silently ships a film
+where a face changes halfway through.
+
+> **Correction, made while planning M2.** Earlier versions of this section said a
+> downstream artifact's hash includes its upstream's `input_hash`. That is wrong, and
+> this section's own example is what disproves it: *"Elena changed"* means a human
+> **edited** Elena's description. Editing does not change the row's `input_hash` —
+> that records which generation produced the row, not what the row now says. Under the
+> old rule those 14 shot images would never have been marked stale, and the headline
+> feature would have silently failed in exactly the case it was written for. Downstream
+> depends on `content_hash`.
+>
+> One consequence for code already shipped: M1's `stories.input_hash` was always a
+> *content* hash — a story has no generation behind it, the user simply wrote it. M2
+> renames that column to `content_hash` rather than leaving the name lying about what
+> it holds.
 
 ### 4.2 Preview vs Final render
 
@@ -263,11 +291,11 @@ Index: `(user_id, created_at)`.
 `moderation_state` · `created_at` · `updated_at` · `deleted_at`
 
 **`stories`** (1:1 with meld; a separate table so revisions can be added later)
-`id` · `meld_id` fk unique · `text` · `input_hash` · `updated_at`
+`id` · `meld_id` fk unique · `text` · `content_hash` · `updated_at`
 
 **`scenes`**
 `id` · `meld_id` fk · `order_index` · `heading` · `summary` · `location` ·
-`time_of_day` · `input_hash` · `state`
+`time_of_day` · `content_hash` · `input_hash` · `state`
 
 **`shots`**
 `id` · `scene_id` fk · `order_index` ·
@@ -276,7 +304,7 @@ Index: `(user_id, created_at)`.
 `camera` enum(`wide`, `medium`, `close`, `insert`, `establishing`) ·
 `dialogue_kind` enum(`none`, `narration`, `off_screen`, `on_screen`) ·
 `speech_text` text · `speaker_character_id` fk nullable ·
-`input_hash` · `state`
+`content_hash` · `input_hash` · `state`
 
 **`shot_characters`** (join table — which characters appear in a shot)
 `shot_id` fk · `character_id` fk · pk `(shot_id, character_id)`
@@ -292,7 +320,7 @@ This join table is what makes a shot go stale when a character changes.
 **`characters`**
 `id` · `meld_id` fk · `name` · `role` · `description` text ·
 `appearance` text (the canonical, hashable visual description) ·
-`voice_id` · `input_hash` · `state`
+`voice_id` · `content_hash` · `input_hash` · `state`
 
 ### 5.3 Generated artifacts
 
