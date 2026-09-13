@@ -16,7 +16,7 @@ from framemeld.providers.base import (
     ProviderResponseError,
     ProviderTransportError,
 )
-from framemeld.script.generation import MIN_SHOT_SECONDS, parse_script
+from framemeld.script.generation import MIN_SHOT_SECONDS, apply_script, parse_script
 from framemeld.script.hashes import (
     content_hash_for_scene,
     content_hash_for_shot,
@@ -115,6 +115,42 @@ def test_the_shot_count_is_capped():
     assert sum(len(scene.shots) for scene in draft.scenes) == 30
 
 
+def test_an_overlong_heading_is_truncated_not_rejected():
+    """A 250-character heading must not fail ScriptDraft.model_validate and
+    lose the entire script -- the same clamp-not-reject policy the numeric
+    and enum fields already get."""
+    draft = parse_script(
+        '{"scenes":[{"heading":"'
+        + "H" * 250
+        + '","summary":"s","location":"l","time_of_day":"day",'
+        '"shots":[{"image_prompt":"p","motion_prompt":"m","duration_sec":3,'
+        '"camera":"wide","dialogue_kind":"none","speech_text":""}]}]}'
+    )
+    assert len(draft.scenes[0].heading) == 200
+
+
+async def test_apply_script_returns_the_scene_and_shot_counts(db):
+    """(scenes, shots) is a specified interface (task-8-brief's Produces
+    list) with no coverage until now."""
+    shot = (
+        '{"image_prompt":"p","motion_prompt":"m","duration_sec":3,'
+        '"camera":"wide","dialogue_kind":"none","speech_text":""}'
+    )
+    draft = parse_script(
+        '{"scenes":['
+        '{"heading":"A","summary":"s","location":"l","time_of_day":"day","shots":['
+        + shot
+        + ","
+        + shot
+        + "]},"
+        '{"heading":"B","summary":"s","location":"l","time_of_day":"day","shots":[' + shot + "]}"
+        "]}"
+    )
+    _user, meld = await _meld_with_story(db)
+    result = await apply_script(db, meld, draft, input_hash="a" * 64)
+    assert result == (2, 3)
+
+
 async def test_a_generated_script_is_persisted_and_fresh(db):
     _user, meld = await _meld_with_story(db)
     job = await _queue_script_job(db, meld)
@@ -128,7 +164,10 @@ async def test_a_generated_script_is_persisted_and_fresh(db):
     scenes = (await db.execute(select(Scene).order_by(Scene.order_index))).scalars().all()
     shots = (await db.execute(select(Shot))).scalars().all()
     assert len(scenes) == 2
-    assert len(shots) >= 2
+    # Exact, not >=: an off-by-one (a dropped or duplicated shot) would
+    # pass a >= check silently. The stub is deterministic for STORY, so an
+    # exact count is not a flaky assertion.
+    assert len(shots) == 5
     assert all(row.state is ArtifactState.FRESH for row in (*scenes, *shots))
     assert all(row.input_hash == job_input_hash for row in (*scenes, *shots))
     # Not just non-empty: the stored hash must be the one the hash functions
@@ -160,7 +199,11 @@ async def test_regenerating_replaces_rather_than_appends(db):
 
     db.expire_all()
     scenes = (await db.execute(select(Scene))).scalars().all()
+    shots = (await db.execute(select(Shot))).scalars().all()
     assert len(scenes) == 1
+    # The scene count alone would not catch the first script's shots
+    # surviving alongside the second's -- only the shot count would.
+    assert len(shots) == 1
 
 
 async def test_a_story_that_changed_mid_job_leaves_the_result_stale(db):

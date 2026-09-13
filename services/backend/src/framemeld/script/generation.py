@@ -65,8 +65,12 @@ SCRIPT_JSON_SCHEMA: dict[str, Any] = {
                                     "motion_prompt": {"type": "string"},
                                     "duration_sec": {
                                         "type": "number",
-                                        "minimum": 0.5,
-                                        "maximum": 5.0,
+                                        # float(): JSON Schema needs a number, and MIN_SHOT_SECONDS
+                                        # / MAX_SHOT_SECONDS are Decimals -- imported rather than
+                                        # restated, or a drifted copy would leave the input hash
+                                        # describing bounds the schema no longer enforces.
+                                        "minimum": float(MIN_SHOT_SECONDS),
+                                        "maximum": float(MAX_SHOT_SECONDS),
                                     },
                                     "camera": {
                                         "type": "string",
@@ -118,17 +122,50 @@ def build_messages(story_text: str) -> tuple[str, str]:
     way). Padding the user message with instruction text would make that
     check never fire, and would hand the stub's paragraph-splitting an
     extra "paragraph" that is not part of the story at all.
+
+    A consequence: untrusted story text now reaches the model with no
+    boundary marker separating it from instructions. If a delimiter is
+    ever wanted, adapt the stub's paragraph heuristic to match -- not this
+    prompt -- since the stub's contract is what now constrains its shape.
     """
     return _SYSTEM, story_text
 
 
+def _truncated(value: object, limit: int) -> object:
+    """Shared by the string-overrun validators below: an over-long value is
+    truncated rather than rejected, the same clamp-not-reject policy the
+    numeric and enum fields follow -- a 250-character heading failing
+    ScriptDraft.model_validate would lose the entire script over one field,
+    which is the opposite of that rule. Non-strings pass through unchanged
+    so pydantic's own type error still fires; this only trims length."""
+    return value[:limit] if isinstance(value, str) and len(value) > limit else value
+
+
 class DraftShot(BaseModel):
-    image_prompt: str = Field(min_length=1, max_length=4000)
-    motion_prompt: str = Field(default="", max_length=2000)
+    image_prompt: str = Field(min_length=1)
+    motion_prompt: str = Field(default="")
     duration_sec: Decimal
     camera: CameraAngle = CameraAngle.MEDIUM
     dialogue_kind: DialogueKind = DialogueKind.NONE
-    speech_text: str = Field(default="", max_length=4000)
+    speech_text: str = Field(default="")
+
+    @field_validator("image_prompt", mode="before")
+    @classmethod
+    def _truncate_image_prompt(cls, value: object) -> object:
+        # min_length=1 stays terminal: an empty prompt is a missing shot,
+        # not a fidelity loss. Overlong is different -- truncating keeps
+        # the shot instead of losing the whole script over one long field.
+        return _truncated(value, 4000)
+
+    @field_validator("motion_prompt", mode="before")
+    @classmethod
+    def _truncate_motion_prompt(cls, value: object) -> object:
+        return _truncated(value, 2000)
+
+    @field_validator("speech_text", mode="before")
+    @classmethod
+    def _truncate_speech_text(cls, value: object) -> object:
+        return _truncated(value, 4000)
 
     @field_validator("duration_sec", mode="before")
     @classmethod
@@ -170,11 +207,35 @@ class DraftShot(BaseModel):
 
 
 class DraftScene(BaseModel):
-    heading: str = Field(default="", max_length=200)
-    summary: str = Field(default="", max_length=4000)
-    location: str = Field(default="", max_length=200)
-    time_of_day: str = Field(default="", max_length=50)
+    heading: str = Field(default="")
+    summary: str = Field(default="")
+    location: str = Field(default="")
+    time_of_day: str = Field(default="")
     shots: list[DraftShot] = Field(default_factory=list)
+
+    @field_validator("heading", mode="before")
+    @classmethod
+    def _truncate_heading(cls, value: object) -> object:
+        # heading/location are varchar(200) columns; summary is Text with
+        # no DB-enforced width, but truncating it to the same bound this
+        # field used to reject at keeps generated content reasonably sized.
+        return _truncated(value, 200)
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def _truncate_location(cls, value: object) -> object:
+        return _truncated(value, 200)
+
+    @field_validator("time_of_day", mode="before")
+    @classmethod
+    def _truncate_time_of_day(cls, value: object) -> object:
+        # varchar(50).
+        return _truncated(value, 50)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _truncate_summary(cls, value: object) -> object:
+        return _truncated(value, 4000)
 
 
 class ScriptDraft(BaseModel):
