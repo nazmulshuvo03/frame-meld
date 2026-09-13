@@ -31,12 +31,19 @@ class Settings(BaseSettings):
     login_window_seconds: int = 900
 
     # "stub" is the default so the app and the test suite both run with no
-    # API key and no network. Set LLM_PROVIDER=openrouter in .env to use the
-    # real one.
+    # API key and no network. Set LLM_PROVIDER=gemini or LLM_PROVIDER=openrouter
+    # in .env to use a real one -- the adapter boundary (spec section 3.3) is
+    # what makes this a one-line, one-restart swap rather than a code change.
     llm_provider: str = "stub"
-    llm_model: str = "qwen/qwen3-next-80b-a3b-instruct:free"
+    # gemini-flash-lite-latest: the cheapest Gemini tier, chosen for local
+    # development (2026-09-13 pivot -- see the design spec's provider
+    # section). Google keeps this alias pointed at its current cheap Flash
+    # model, so it does not go stale the way a dated model id would.
+    llm_model: str = "gemini-flash-lite-latest"
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    gemini_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
 
     # FastAPI's interactive docs enumerate every endpoint and schema to
     # anonymous callers. Fine locally, not on a public host.

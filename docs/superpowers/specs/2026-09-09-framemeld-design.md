@@ -412,6 +412,49 @@ Chosen for cost and for licences that are safe to sell against.
 - Because free tiers vanish, the provider adapter boundary (section 3.3) is a
   requirement, not a nicety.
 
+### 6.3 Local development default: Google Gemini (added 2026-09-13)
+
+The table above remains the **production** target — nothing here changes the cost
+model in section 7. This section records an interim, explicitly swappable choice for
+building and testing locally, made possible by the adapter boundary (section 3.3) that
+already existed for exactly this kind of change.
+
+The developer has a Google AI Pro subscription (consumer plan; separate from API
+billing) and a Gemini API key with **$10/month in Google Cloud credit** attached.
+
+| Stage | Local dev default | Free via API key? | Notes |
+|---|---|---|---|
+| Script, characters, moderation (`LLMProvider`) | **Gemini Flash-Lite** (`gemini-flash-lite-latest`) | Yes, rate-limited | New default for `LLM_PROVIDER`; OpenRouter's adapter is kept and still selectable, unchanged |
+| Speech (`SpeechProvider`) | Gemini native TTS (`gemini-*-flash-tts-preview`) | Yes, rate-limited | Not built yet — arrives with M4 |
+| Character sheets / shot stills (`ImageProvider`) | Nano Banana or Imagen 4 Fast | **No** — paid, ~$0.02–0.04/image | Not built yet — arrives with M3/M4. Funded from the $10/month credit |
+| Music (`MusicProvider`) | Lyria (clip or full-length) | **No** — paid, ~$0.04–0.08/track | Not built yet — arrives with M5 |
+| Image-to-video (`VideoProvider`) | Veo 3.1 Lite, 720p | **No** — paid, $0.05/sec | Not built yet — arrives with M6. By far the dominant cost: ≈150s per 30-shot film ≈ $7.50, so the $10 credit funds roughly one full test film a month |
+
+**Why Gemini and not something else, for now:** the LLM swap is genuinely free and
+likely more reliable than OpenRouter's free roster for this project's specific need —
+Gemini has first-class structured-output support (`responseSchema`), which matters
+because `SCRIPT_JSON_SCHEMA` (`framemeld/script/generation.py`) pairs `strict: true`
+with `minItems`/`maxItems`/enum constraints that OpenRouter's free models have already
+been flagged as possibly rejecting (see the M2 status doc's *Unverified* section). The
+image/video/music choices are recorded here as the intended default for when those
+adapters are actually built (M3–M6); none of that code exists yet.
+
+**This is not a production decision.** Gemini's paid tiers cost roughly the same
+per-film as the spec's original self-hosted stack (Veo 3.1 Lite's ~$7.50/film video
+cost is close to Wan 2.2's ~$6, section 7), so there is no cost argument for staying on
+Gemini once a milestone needs real volume — the point of building each adapter behind
+the `LLMProvider`/`ImageProvider`/`VideoProvider`/`SpeechProvider`/`MusicProvider`
+protocols is that this remains a config change, not a rewrite, whichever way it goes.
+
+**Still unverified, same shape as the OpenRouter caveat:** whether Gemini's
+`generationConfig.responseSchema` accepts `SCRIPT_JSON_SCHEMA`'s exact nested shape
+(`additionalProperties: false` inside a `strict` OpenAI-style wrapper, `minItems` /
+`maxItems` on the shots array) has not been confirmed against a live call. The adapter
+strips the OpenAI wrapper and forwards only the inner `schema` object; if Gemini
+rejects a keyword it will surface as a `ProviderResponseError` the first time a real
+key is used, not in the test suite (which runs the request/response contract against a
+mocked transport, not the real API).
+
 ---
 
 ## 7. Cost model
@@ -549,8 +592,9 @@ Recorded so they are not relitigated.
 | Project size | 1–3 min, 10–30 shots |
 | v1 audio | Narration + dialogue + music + SFX (no captions) |
 | Architecture bet | Content-addressed artifacts with explicit staleness |
+| Local dev provider (2026-09-13) | Google Gemini (Flash-Lite for LLM now; Nano Banana/Imagen, Veo 3.1 Lite, Lyria for image/video/music when those adapters are built) — interim, swappable, not a production choice (section 6.3) |
 
-All decisions dated 2026-09-09.
+All decisions dated 2026-09-09 except where a row states otherwise.
 
 ---
 

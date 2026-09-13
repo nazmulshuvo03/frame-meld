@@ -16,6 +16,17 @@ from framemeld.jobs.queue import RecordingQueue, get_queue
 from framemeld.redis_client import get_redis
 
 
+@pytest.fixture(autouse=True)
+def _stub_llm_by_default(monkeypatch):
+    """The suite must never depend on the developer's own .env choice of
+    LLM_PROVIDER: Settings reads that file directly (config.py's _ENV_FILE),
+    so switching it to a real adapter for manual local testing would
+    otherwise silently break every test that reaches the registry. A test
+    that wants a real adapter overrides this with its own monkeypatch,
+    which simply wins for that test's duration."""
+    monkeypatch.setattr(settings, "llm_provider", "stub")
+
+
 @pytest.fixture(scope="session")
 async def test_engine():
     assert settings.test_database_url != settings.database_url, (
