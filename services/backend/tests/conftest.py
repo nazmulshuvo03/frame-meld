@@ -12,6 +12,7 @@ import framemeld.models  # noqa: F401
 from framemeld.api_main import app
 from framemeld.config import settings
 from framemeld.db import Base, get_session
+from framemeld.jobs.queue import RecordingQueue, get_queue
 from framemeld.redis_client import get_redis
 
 
@@ -77,12 +78,21 @@ async def fake_redis():
 
 
 @pytest.fixture
-async def client(db, fake_redis) -> AsyncGenerator[AsyncClient, None]:
+def recording_queue() -> RecordingQueue:
+    return RecordingQueue()
+
+
+@pytest.fixture
+async def client(db, fake_redis, recording_queue) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_session():
         yield db
 
+    async def override_get_queue():
+        return recording_queue
+
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[get_redis] = lambda: fake_redis
+    app.dependency_overrides[get_queue] = override_get_queue
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -90,6 +100,7 @@ async def client(db, fake_redis) -> AsyncGenerator[AsyncClient, None]:
     finally:
         app.dependency_overrides.pop(get_session, None)
         app.dependency_overrides.pop(get_redis, None)
+        app.dependency_overrides.pop(get_queue, None)
 
 
 @pytest.fixture
