@@ -2,9 +2,10 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from framemeld.models.script import MAX_SHOT_SECONDS, CameraAngle, DialogueKind
+from framemeld.script.generation import MIN_SHOT_SECONDS
 
 
 class ShotOut(BaseModel):
@@ -63,7 +64,31 @@ class ScriptOut(BaseModel):
     stale_shots: int
 
 
-class ScenePatch(BaseModel):
+class _RejectsExplicitNull:
+    """Shared by ScenePatch and ShotPatch. Every field on both is optional in
+    the sense of "may be omitted", not "may be cleared to nothing": each
+    backs a NOT NULL column with a "" default, so send "" to empty a text
+    field. `model_dump(exclude_unset=True)` excludes fields the client
+    *omitted*, not fields it explicitly set to null — so an unguarded
+    `{"heading": null}` reaches `setattr(row, name, None)` against a NOT
+    NULL column and raises IntegrityError at flush, a 500 instead of a 422.
+
+    A `mode="before"` validator does not run for a field the client
+    omitted, only for one it actually sent — checked against the installed
+    pydantic (2.13.5): an omitted field keeps its default untouched and
+    unvalidated, so this rejects null without disturbing the
+    omitted-means-unchanged path that `exclude_unset` relies on.
+    """
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _null_is_not_a_value(cls, value: object) -> object:
+        if value is None:
+            raise ValueError('null is not a valid value — omit the field, or send ""')
+        return value
+
+
+class ScenePatch(_RejectsExplicitNull, BaseModel):
     """Every field optional: the editor autosaves one field at a time, and
     a full-object PUT would let a stale tab clobber a field it never
     touched."""
@@ -74,13 +99,14 @@ class ScenePatch(BaseModel):
     time_of_day: str | None = Field(default=None, max_length=50)
 
 
-class ShotPatch(BaseModel):
+class ShotPatch(_RejectsExplicitNull, BaseModel):
     image_prompt: str | None = Field(default=None, max_length=4000)
     motion_prompt: str | None = Field(default=None, max_length=2000)
-    #: Bounded here so an over-long shot is a readable 422 rather than a
-    #: 500 from the database CHECK. Both exist on purpose: this one is the
-    #: message, the CHECK is the guarantee.
-    duration_sec: Decimal | None = Field(default=None, gt=0, le=MAX_SHOT_SECONDS)
+    #: Bounded by the same floor the generator clamps to, so a value the
+    #: column cannot hold is a readable 422 rather than a 500 from the
+    #: CHECK: `gt=0` would accept 0.001, which quantises to 0.00 and
+    #: violates `duration_sec > 0`.
+    duration_sec: Decimal | None = Field(default=None, ge=MIN_SHOT_SECONDS, le=MAX_SHOT_SECONDS)
     camera: CameraAngle | None = None
     dialogue_kind: DialogueKind | None = None
     speech_text: str | None = Field(default=None, max_length=4000)

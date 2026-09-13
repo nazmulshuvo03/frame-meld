@@ -293,3 +293,54 @@ async def test_duration_survives_a_round_trip_unchanged(logged_in, db):
     # Unchanged value, unchanged hash: re-sending what you were given is
     # not an edit.
     assert patched.json()["content_hash"] == shot["content_hash"]
+
+
+async def test_an_explicit_null_is_rejected_not_written(logged_in, db):
+    """422, not a 500 from the NOT NULL column. exclude_unset only omits
+    fields the client never sent — an explicit null still reaches
+    setattr() without the schema's own before-validator refusing it."""
+    from framemeld.worker import run_generate_script
+
+    meld_id = await _meld_with_story(logged_in)
+    job = await _generate(logged_in, meld_id)
+    await run_generate_script(db, uuid.UUID(job["id"]))
+
+    shot = (await logged_in.get(f"/melds/{meld_id}/script")).json()["scenes"][0]["shots"][0]
+    response = await logged_in.patch(
+        f"/melds/{meld_id}/shots/{shot['id']}", json={"image_prompt": None}
+    )
+    assert response.status_code == 422
+
+
+async def test_an_explicit_null_on_a_scene_is_also_rejected(logged_in, db):
+    """The same guard applies to ScenePatch: `heading` backs a NOT NULL
+    column with a "" default too."""
+    from framemeld.worker import run_generate_script
+
+    meld_id = await _meld_with_story(logged_in)
+    job = await _generate(logged_in, meld_id)
+    await run_generate_script(db, uuid.UUID(job["id"]))
+
+    scene = (await logged_in.get(f"/melds/{meld_id}/script")).json()["scenes"][0]
+    response = await logged_in.patch(
+        f"/melds/{meld_id}/scenes/{scene['id']}", json={"heading": None}
+    )
+    assert response.status_code == 422
+
+
+async def test_a_sub_hundredth_duration_is_refused(logged_in, db):
+    """gt=0 would accept 0.001, which quantises to 0.00 and trips the
+    database CHECK `duration_sec > 0` — the exact 500 the bound exists to
+    prevent. ge=MIN_SHOT_SECONDS keeps the schema and the storage in
+    agreement."""
+    from framemeld.worker import run_generate_script
+
+    meld_id = await _meld_with_story(logged_in)
+    job = await _generate(logged_in, meld_id)
+    await run_generate_script(db, uuid.UUID(job["id"]))
+
+    shot = (await logged_in.get(f"/melds/{meld_id}/script")).json()["scenes"][0]["shots"][0]
+    response = await logged_in.patch(
+        f"/melds/{meld_id}/shots/{shot['id']}", json={"duration_sec": "0.001"}
+    )
+    assert response.status_code == 422
