@@ -17,14 +17,15 @@ from framemeld.redis_client import get_redis
 
 
 @pytest.fixture(autouse=True)
-def _stub_llm_by_default(monkeypatch):
+def _stub_providers_by_default(monkeypatch):
     """The suite must never depend on the developer's own .env choice of
-    LLM_PROVIDER: Settings reads that file directly (config.py's _ENV_FILE),
-    so switching it to a real adapter for manual local testing would
-    otherwise silently break every test that reaches the registry. A test
-    that wants a real adapter overrides this with its own monkeypatch,
-    which simply wins for that test's duration."""
+    provider: Settings reads that file directly (config.py's _ENV_FILE), so
+    switching either provider to a real adapter for manual testing would
+    otherwise break every test that reaches a registry -- and for images it
+    would also spend money. A test that wants a real adapter overrides this
+    with its own monkeypatch, which simply wins for that test's duration."""
     monkeypatch.setattr(settings, "llm_provider", "stub")
+    monkeypatch.setattr(settings, "image_provider", "stub")
 
 
 @pytest.fixture(autouse=True)

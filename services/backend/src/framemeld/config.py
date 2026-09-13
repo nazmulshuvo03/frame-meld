@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     # section). Google keeps this alias pointed at its current cheap Flash
     # model, so it does not go stale the way a dated model id would.
     llm_model: str = "gemini-flash-lite-latest"
+    # Same shape as LLM_PROVIDER, same reason (M3-D10): "stub" is the
+    # default so the app and the suite both run with no key and no network.
+    # Image generation has no free Gemini tier -- it is billed per image
+    # against the account's Cloud credit -- so switching this on spends
+    # real money (see the design spec's section 6.3).
+    image_provider: str = "stub"
+    image_model: str = "imagen-4.0-fast-generate-001"
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     gemini_api_key: str = ""
