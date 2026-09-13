@@ -3,7 +3,22 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
+from framemeld.cast.hashes import (
+    character_image_input_hash,
+    characters_input_hash,
+    content_hash_for_character,
+    content_hash_for_character_image,
+)
+from framemeld.config import settings
+from framemeld.jobs.service import ensure_job
 from framemeld.melds import service as melds_service
+from framemeld.models.cast import (
+    Character,
+    CharacterImage,
+    CharacterImageKind,
+    CharacterRole,
+)
+from framemeld.models.job import JobKind, JobState
 from framemeld.models.meld import Story
 from framemeld.models.script import ArtifactState, CameraAngle, DialogueKind, Scene, Shot
 from framemeld.models.user import User
@@ -14,6 +29,7 @@ from framemeld.script.hashes import (
     script_input_hash,
 )
 from framemeld.staleness import recompute_staleness
+from framemeld.worker import run_generate_characters
 
 
 async def _meld_with_script(db, story_text="Elena finds a letter.", shots=2):
@@ -204,3 +220,189 @@ async def test_saving_the_story_recomputes_staleness_without_being_asked(db):
     db.expire_all()
     states = {shot.state for shot in (await db.execute(select(Shot))).scalars()}
     assert states == {ArtifactState.STALE}
+
+
+# --- Cast and sheets (M3) -------------------------------------------------
+
+
+async def _meld_with_cast(db, story_text="Elena and Marcus find a letter.", count=2):
+    """A Meld with a story, a fresh cast, and one fresh sheet per
+    character -- the state a user reaches at the end of the Cast stage."""
+    user = User(email=f"{uuid.uuid4()}@example.com", password_hash="x")
+    db.add(user)
+    await db.flush()
+    meld = await melds_service.create_meld(db, user.id, "T")
+    await melds_service.save_story(db, user.id, meld.id, story_text)
+
+    cast_hash = characters_input_hash(content_hash_for_story(story_text))
+    characters = []
+    for index in range(count):
+        character = Character(
+            meld_id=meld.id,
+            order_index=index,
+            name=f"Character {index}",
+            role=CharacterRole.LEAD if index == 0 else CharacterRole.SUPPORTING,
+            description=f"Person {index}.",
+            appearance=f"Distinct appearance {index}.",
+            content_hash="",
+            input_hash=cast_hash,
+            state=ArtifactState.FRESH,
+        )
+        character.content_hash = content_hash_for_character(character)
+        db.add(character)
+        await db.flush()
+
+        image = CharacterImage(
+            character_id=character.id,
+            kind=CharacterImageKind.SHEET,
+            is_canonical=True,
+            content_hash=content_hash_for_character_image(f"{index}" * 64),
+            input_hash=character_image_input_hash(character.content_hash, CharacterImageKind.SHEET),
+            state=ArtifactState.FRESH,
+        )
+        db.add(image)
+        characters.append(character)
+
+    await db.flush()
+    return user, meld, characters
+
+
+async def _sheets(db):
+    return list(
+        (
+            await db.execute(select(CharacterImage).join(Character).order_by(Character.order_index))
+        ).scalars()
+    )
+
+
+async def test_editing_a_character_marks_only_their_own_sheet_stale(db):
+    """The headline promise of the two-hash rule, at the cast level. If
+    this is wrong the user is either charged to regenerate artwork that was
+    fine, or shown artwork of a character who no longer looks like that."""
+    _user, meld, characters = await _meld_with_cast(db)
+    first, second = characters
+
+    first.appearance = "Now with a beard."
+    first.content_hash = content_hash_for_character(first)
+    await db.flush()
+
+    report = await recompute_staleness(db, meld.id)
+
+    first_sheet, second_sheet = await _sheets(db)
+    assert first_sheet.state is ArtifactState.STALE
+    assert second_sheet.state is ArtifactState.FRESH
+    assert report.stale_sheets == 1
+    # The characters themselves are untouched: an edit is not staleness (D4),
+    # and the story that produced them has not changed.
+    assert first.state is ArtifactState.FRESH
+    assert second.state is ArtifactState.FRESH
+
+
+async def test_editing_the_story_marks_the_cast_stale_but_not_the_sheets(db):
+    """A sheet's input is its character, not the story. The cast goes out
+    of date; the artwork of a character nobody has edited does not."""
+    user, meld, characters = await _meld_with_cast(db)
+
+    await melds_service.save_story(db, user.id, meld.id, "A completely different story.")
+
+    report = await recompute_staleness(db, meld.id)
+
+    assert all(character.state is ArtifactState.STALE for character in characters)
+    assert report.stale_characters == 2
+    assert all(sheet.state is ArtifactState.FRESH for sheet in await _sheets(db))
+    assert report.stale_sheets == 0
+
+
+async def test_reverting_a_character_edit_clears_the_staleness(db):
+    """Spec 4.4: reverting restores the cache hit and costs nothing."""
+    _user, meld, characters = await _meld_with_cast(db)
+    first = characters[0]
+    original = first.appearance
+
+    first.appearance = "Now with a beard."
+    first.content_hash = content_hash_for_character(first)
+    await db.flush()
+    await recompute_staleness(db, meld.id)
+    assert (await _sheets(db))[0].state is ArtifactState.STALE
+
+    first.appearance = original
+    first.content_hash = content_hash_for_character(first)
+    await db.flush()
+    await recompute_staleness(db, meld.id)
+
+    assert (await _sheets(db))[0].state is ArtifactState.FRESH
+
+
+async def test_a_generating_sheet_is_left_alone(db):
+    """D5: a `generating` row is owned by a worker that is about to write
+    it. Flipping it to stale mid-flight would make the UI lie and could
+    make the worker's own write look like a regression."""
+    _user, meld, characters = await _meld_with_cast(db)
+    first = characters[0]
+    first_sheet = (await _sheets(db))[0]
+    first_sheet.state = ArtifactState.GENERATING
+
+    first.appearance = "Now with a beard."
+    first.content_hash = content_hash_for_character(first)
+    await db.flush()
+
+    await recompute_staleness(db, meld.id)
+
+    assert (await _sheets(db))[0].state is ArtifactState.GENERATING
+
+
+async def test_a_failed_sheet_is_left_alone(db):
+    """Also D5: a failed row's problem is not its inputs, and calling it
+    stale would hide that it needs a retry rather than a re-edit."""
+    _user, meld, _characters = await _meld_with_cast(db)
+    first_sheet = (await _sheets(db))[0]
+    first_sheet.state = ArtifactState.FAILED
+    await db.flush()
+
+    await recompute_staleness(db, meld.id)
+
+    assert (await _sheets(db))[0].state is ArtifactState.FAILED
+
+
+async def test_changing_the_image_model_marks_every_sheet_stale(db, monkeypatch):
+    """True rather than surprising -- regenerating really would produce
+    something different -- but it is a Meld-wide effect from an operator
+    config change, so it is pinned rather than discovered."""
+    _user, meld, _characters = await _meld_with_cast(db)
+
+    monkeypatch.setattr(settings, "image_model", "some-other-image-model")
+    report = await recompute_staleness(db, meld.id)
+
+    assert report.stale_sheets == 2
+    assert report.stale_characters == 0
+
+
+async def test_a_story_edited_mid_job_leaves_the_new_cast_stale(db, monkeypatch):
+    """The rows a job writes carry the hash of the story it was queued for.
+    If that is no longer current they are genuinely out of date and must
+    say so rather than claim fresh."""
+    user = User(email=f"{uuid.uuid4()}@example.com", password_hash="x")
+    db.add(user)
+    await db.flush()
+    meld = await melds_service.create_meld(db, user.id, "T")
+    await melds_service.save_story(db, user.id, meld.id, "Elena finds a letter.")
+
+    dispatch = await ensure_job(
+        db,
+        meld_id=meld.id,
+        kind=JobKind.GENERATE_CHARACTERS,
+        target_table="melds",
+        target_id=meld.id,
+        input_hash=characters_input_hash(content_hash_for_story("Elena finds a letter.")),
+    )
+    # The user keeps typing while the job is queued.
+    await melds_service.save_story(db, user.id, meld.id, "Elena finds a letter. Then rain.")
+
+    outcome = await run_generate_characters(db, dispatch.job.id)
+
+    assert outcome.state is JobState.SUCCEEDED
+    characters = list(
+        (await db.execute(select(Character).where(Character.meld_id == meld.id))).scalars()
+    )
+    assert characters
+    assert all(character.state is ArtifactState.STALE for character in characters)
