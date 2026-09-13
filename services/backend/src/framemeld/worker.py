@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
 from framemeld.config import settings
 from framemeld.db import SessionLocal
-from framemeld.jobs.service import mark_failed, mark_running, mark_succeeded
+from framemeld.jobs.service import mark_failed, mark_for_retry, mark_running, mark_succeeded
 from framemeld.models.job import Job, JobState
 from framemeld.models.meld import Meld, Story
 from framemeld.providers.base import ProviderError
@@ -72,9 +72,12 @@ async def run_generate_script(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
     except ProviderError as exc:
         # The message reaches the user through jobs.error, so adapters and
         # the parser both phrase their errors for a reader, not a log.
-        await mark_failed(db, job, str(exc))
         logger.warning("generate_script failed for job %s: %s", job.id, exc)
-        return JobOutcome(JobState.FAILED, retryable=exc.retryable)
+        if exc.retryable and job.attempts < MAX_ATTEMPTS:
+            await mark_for_retry(db, job, str(exc))
+            return JobOutcome(JobState.QUEUED, retryable=True)
+        await mark_failed(db, job, str(exc))
+        return JobOutcome(JobState.FAILED, retryable=False)
 
     await apply_script(db, meld, draft, job.input_hash)
 
@@ -89,23 +92,24 @@ async def run_generate_script(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
 
 
 async def generate_script(ctx: dict[str, Any], job_id: str) -> str:
-    """The arq task. Owns the session and the retry decision; the work
-    itself is in run_generate_script."""
+    """The arq task. Owns the session and the redelivery; the work itself,
+    including the retry decision, is in run_generate_script."""
     async with SessionLocal() as db:
         outcome = await run_generate_script(db, uuid.UUID(job_id))
+        attempts = (
+            await db.execute(select(Job.attempts).where(Job.id == uuid.UUID(job_id)))
+        ).scalar_one_or_none()
         # Committed before any Retry is raised, so the recorded failure and
         # the incremented attempt count survive the re-queue. Raising first
         # would roll them back and the budget would never be spent.
         await db.commit()
-        attempts = (
-            await db.execute(select(Job.attempts).where(Job.id == uuid.UUID(job_id)))
-        ).scalar_one_or_none() or MAX_ATTEMPTS
 
-    if outcome.retryable and attempts < MAX_ATTEMPTS:
-        # Exponential backoff: 2s, then 4s. A content refusal or a bad
-        # response never reaches here — those are terminal by spec 5.4,
-        # and retrying them would spend money to be refused again.
-        raise Retry(defer=2**attempts)
+    if outcome.retryable:
+        # Exponential backoff: 2s, then 4s. The budget itself was already
+        # decided in run_generate_script; a True here only ever means
+        # "retry", never "retry forever" — a content refusal or a bad
+        # response is terminal by spec 5.4 and never sets retryable=True.
+        raise Retry(defer=2 ** (attempts or 1))
 
     return outcome.state.value
 
@@ -115,7 +119,8 @@ class WorkerSettings:
 
     functions: ClassVar[list[WorkerCoroutine]] = [generate_script]
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    #: Retries are decided above, from the job row, so arq must not add its
-    #: own on top — two independent budgets would multiply.
-    max_tries = 1
+    #: arq checks `job_try > max_tries` before executing, so this gates the
+    #: explicit Retry above, not just arq's own automatic retries. Set below
+    #: MAX_ATTEMPTS and a retryable failure is dropped rather than retried.
+    max_tries = MAX_ATTEMPTS
     job_timeout = 300

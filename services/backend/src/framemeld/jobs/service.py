@@ -133,3 +133,20 @@ async def mark_failed(db: DbSession, job: Job, error: str) -> None:
     job.error = error[:2000]
     job.finished_at = datetime.now(UTC)
     await db.flush()
+
+
+async def mark_for_retry(db: DbSession, job: Job, error: str) -> None:
+    """Hand a job back to the queue after a failure worth repeating.
+
+    Returns the row to `queued` so the redelivered message can claim it —
+    `mark_running` only claims from `queued`, so a job left `failed` is a
+    job the retry silently skips. `attempts` is deliberately kept: it is
+    the row's history and the budget reads it.
+
+    The error is recorded even though the job has not finally failed, so a
+    user watching a job retry can see why it is retrying.
+    """
+    job.state = JobState.QUEUED
+    job.error = error[:2000]
+    job.started_at = None
+    await db.flush()

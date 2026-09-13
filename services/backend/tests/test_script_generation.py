@@ -4,13 +4,18 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+import framemeld.worker as worker_module
 from framemeld.jobs.service import ensure_job
 from framemeld.melds import service as melds_service
-from framemeld.models.job import JobKind, JobState
+from framemeld.models.job import Job, JobKind, JobState
 from framemeld.models.meld import Meld, MeldStage
 from framemeld.models.script import ArtifactState, Scene, Shot
 from framemeld.models.user import User
-from framemeld.providers.base import ProviderResponseError
+from framemeld.providers.base import (
+    ProviderRefusedError,
+    ProviderResponseError,
+    ProviderTransportError,
+)
 from framemeld.script.generation import parse_script
 from framemeld.script.hashes import content_hash_for_story, script_input_hash
 from framemeld.worker import run_generate_script
@@ -160,8 +165,6 @@ async def test_a_provider_refusal_fails_the_job_with_a_readable_reason(db):
     assert (await run_generate_script(db, job.id)).state is JobState.FAILED
 
     db.expire_all()
-    from framemeld.models.job import Job
-
     reloaded = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one()
     assert reloaded.error
     assert "story" in reloaded.error.lower()
@@ -176,3 +179,96 @@ async def test_a_job_that_is_not_queued_is_skipped(db):
     assert (await run_generate_script(db, job.id)).state is JobState.SUCCEEDED
     db.expire_all()
     assert len((await db.execute(select(Scene))).scalars().all()) == 2
+
+
+class _FailingProvider:
+    """A stand-in adapter whose `complete` always raises the given error.
+
+    Monkeypatched onto `framemeld.worker.get_llm_provider` rather than onto
+    the registry: worker.py does `from ...registry import get_llm_provider`,
+    so the name is already bound in worker's own namespace by the time a
+    test runs, and patching the registry module would not reach it.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def complete(self, *, system, user, json_schema):
+        raise self._error
+
+
+async def test_a_retryable_failure_returns_the_job_to_the_queue(db, monkeypatch):
+    """Spec 5.4 promises three attempts on transport errors. A job left
+    `failed` is one the redelivery skips, because mark_running only claims
+    from `queued`."""
+    _user, meld = await _meld_with_story(db)
+    job = await _queue_script_job(db, meld)
+    job_id = job.id
+
+    monkeypatch.setattr(
+        worker_module,
+        "get_llm_provider",
+        lambda: _FailingProvider(ProviderTransportError("upstream timed out")),
+    )
+
+    outcome = await run_generate_script(db, job_id)
+    assert outcome.state is JobState.QUEUED
+    assert outcome.retryable is True
+
+    db.expire_all()
+    reloaded = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one()
+    assert reloaded.state is JobState.QUEUED
+    assert reloaded.attempts == 1
+
+
+async def test_the_attempt_budget_is_eventually_spent(db, monkeypatch):
+    """After MAX_ATTEMPTS the job fails terminally rather than retrying
+    forever."""
+    _user, meld = await _meld_with_story(db)
+    job = await _queue_script_job(db, meld)
+    job_id = job.id
+
+    monkeypatch.setattr(
+        worker_module,
+        "get_llm_provider",
+        lambda: _FailingProvider(ProviderTransportError("upstream timed out")),
+    )
+
+    outcome = None
+    # Each call stands in for one arq redelivery: mark_running only claims
+    # from `queued`, which is exactly the state the previous attempt left
+    # the row in.
+    for _ in range(worker_module.MAX_ATTEMPTS):
+        outcome = await run_generate_script(db, job_id)
+
+    assert outcome.state is JobState.FAILED
+    assert outcome.retryable is False
+
+    db.expire_all()
+    reloaded = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one()
+    assert reloaded.state is JobState.FAILED
+    assert reloaded.attempts == worker_module.MAX_ATTEMPTS
+
+
+async def test_a_terminal_failure_is_not_retried(db, monkeypatch):
+    """A refusal retried is money spent to be refused again."""
+    _user, meld = await _meld_with_story(db)
+    job = await _queue_script_job(db, meld)
+    job_id = job.id
+
+    monkeypatch.setattr(
+        worker_module,
+        "get_llm_provider",
+        lambda: _FailingProvider(ProviderRefusedError("the model declined")),
+    )
+
+    outcome = await run_generate_script(db, job_id)
+    assert outcome.state is JobState.FAILED
+    assert outcome.retryable is False
+
+    db.expire_all()
+    reloaded = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one()
+    # Not requeued: a terminal failure must not be handed back to a
+    # redelivery, or the budget check above is pointless.
+    assert reloaded.state is JobState.FAILED
+    assert reloaded.attempts == 1
