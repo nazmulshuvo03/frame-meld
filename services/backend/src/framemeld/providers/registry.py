@@ -17,7 +17,8 @@ def get_llm_provider() -> LLMProvider:
     if settings.llm_provider == "openrouter":
         from framemeld.providers.openrouter import OpenRouterLLMProvider
 
-        # Imported lazily so a stub-configured install never needs httpx to
-        # be importable at module load.
+        # Imported lazily so a stub-configured install never pays for the
+        # adapter's own imports at module load -- this branch is the
+        # natural place to keep that cost, since it is the only caller.
         return OpenRouterLLMProvider()
     raise ValueError(f"Unknown LLM_PROVIDER: {settings.llm_provider!r}")
