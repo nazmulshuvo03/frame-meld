@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { StaleBadge } from "@/components/StaleBadge";
+import { SceneCard } from "@/components/SceneCard";
 import { useJobPolling } from "@/lib/useJobPolling";
 import { ApiError, generateScript, getScript, type Job, type ScriptView } from "@/lib/api";
 
@@ -141,34 +141,21 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
       ) : (
         <ol className="flex flex-col gap-8">
           {script.scenes.map((scene) => (
-            <li key={scene.id}>
-              <div className="mb-2 flex items-baseline gap-3">
-                <h2 className="font-mono text-sm font-semibold uppercase tracking-wide">
-                  {scene.heading || "Untitled scene"}
-                </h2>
-                {scene.state === "stale" && <StaleBadge />}
-              </div>
-              <p className="mb-3 text-sm text-neutral-600">{scene.summary}</p>
-              <ol className="flex flex-col gap-3">
-                {scene.shots.map((shot) => (
-                  <li key={shot.id} className="rounded border border-neutral-200 p-4 text-sm">
-                    <div className="mb-2 flex items-center gap-2 text-xs text-neutral-500">
-                      <span>Shot {shot.order_index + 1}</span>
-                      <span>·</span>
-                      <span>{shot.camera}</span>
-                      <span>·</span>
-                      <span>{shot.duration_sec}s</span>
-                      {shot.state === "stale" && <StaleBadge className="ml-auto" />}
-                    </div>
-                    <p>{shot.image_prompt}</p>
-                    <p className="mt-1 text-neutral-500">Motion: {shot.motion_prompt}</p>
-                    {shot.speech_text && (
-                      <p className="mt-1 italic text-neutral-600">&ldquo;{shot.speech_text}&rdquo;</p>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            </li>
+            <SceneCard
+              key={scene.id}
+              meldId={id}
+              scene={scene}
+              onSaved={(saved) =>
+                setScript((current) =>
+                  current === null
+                    ? current
+                    : {
+                        ...current,
+                        scenes: current.scenes.map((s) => (s.id === saved.id ? saved : s)),
+                      },
+                )
+              }
+            />
           ))}
         </ol>
       )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ApiError, getMeld, saveStory, type MeldDetail } from "@/lib/api";
@@ -22,12 +22,18 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
   const [text, setText] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
+  // The hash the server last confirmed. A ref, not state: changing it must
+  // not re-render, and onSave must see the newest value rather than one
+  // captured in a stale closure.
+  const contentHashRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     getMeld(id)
       .then((detail) => {
         setMeld(detail);
         setText(detail.story?.text ?? "");
+        contentHashRef.current = detail.story?.content_hash;
         setLoaded(true);
       })
       .catch((err) => {
@@ -48,7 +54,20 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
 
   const onSave = useCallback(
     async (value: string) => {
-      await saveStory(id, value);
+      try {
+        const saved = await saveStory(id, value, contentHashRef.current);
+        contentHashRef.current = saved.content_hash;
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          // Someone else — almost always this user's own second tab — saved
+          // in between. Stop editing rather than racing them: the textarea
+          // goes read-only and the banner explains why. Rethrown so
+          // useAutosave still reports "error" and keeps the close warning
+          // armed, because this text really is unsaved.
+          setConflict(true);
+        }
+        throw err;
+      }
     },
     [id],
   );
@@ -89,11 +108,26 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
         </span>
       </header>
 
+      {conflict && (
+        <div
+          role="alert"
+          className="mb-4 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <strong className="font-medium">This Meld was edited somewhere else.</strong> Your
+          changes here have not been saved. Copy anything you want to keep, then{" "}
+          <button onClick={() => window.location.reload()} className="underline">
+            reload
+          </button>{" "}
+          to get the latest version.
+        </div>
+      )}
+
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
+        disabled={conflict}
         placeholder="Write your story here. Anything from a paragraph to a few pages — you'll turn it into a script next."
-        className="min-h-[60vh] flex-1 resize-none rounded border border-neutral-200 p-6 font-serif text-lg leading-relaxed outline-none focus:border-neutral-400"
+        className="min-h-[60vh] flex-1 resize-none rounded border border-neutral-200 p-6 font-serif text-lg leading-relaxed outline-none focus:border-neutral-400 disabled:bg-neutral-50 disabled:text-neutral-500"
       />
 
       <footer className="mt-4 flex items-center justify-between text-sm text-neutral-500">
