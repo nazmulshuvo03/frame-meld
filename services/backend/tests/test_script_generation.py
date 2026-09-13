@@ -16,7 +16,7 @@ from framemeld.providers.base import (
     ProviderResponseError,
     ProviderTransportError,
 )
-from framemeld.script.generation import parse_script
+from framemeld.script.generation import MIN_SHOT_SECONDS, parse_script
 from framemeld.script.hashes import content_hash_for_story, script_input_hash
 from framemeld.worker import run_generate_script
 
@@ -80,6 +80,19 @@ def test_an_invented_camera_angle_falls_back():
     shot = draft.scenes[0].shots[0]
     assert shot.camera.value == "medium"
     assert shot.dialogue_kind.value == "none"
+
+
+def test_a_nan_duration_is_clamped_not_left_to_crash():
+    """json.loads accepts NaN by default. NaN survives Decimal(str(...))
+    and only raises InvalidOperation from the comparison that follows --
+    an ArithmeticError, not a ProviderError, that must not escape the
+    parser and strand the worker outside its except clause."""
+    draft = parse_script(
+        '{"scenes":[{"heading":"A","summary":"s","location":"l","time_of_day":"day",'
+        '"shots":[{"image_prompt":"p","motion_prompt":"m","duration_sec":NaN,'
+        '"camera":"wide","dialogue_kind":"none","speech_text":""}]}]}'
+    )
+    assert draft.scenes[0].shots[0].duration_sec == MIN_SHOT_SECONDS
 
 
 def test_the_shot_count_is_capped():
@@ -272,3 +285,29 @@ async def test_a_terminal_failure_is_not_retried(db, monkeypatch):
     # redelivery, or the budget check above is pointless.
     assert reloaded.state is JobState.FAILED
     assert reloaded.attempts == 1
+
+
+async def test_an_unforeseen_exception_still_leaves_the_job_actionable(db, monkeypatch):
+    """A crash outside the ProviderError hierarchy (the NaN/InvalidOperation
+    case this guards against, or anything else unforeseen) must not escape
+    run_generate_script: doing so would roll back mark_running's RUNNING and
+    strand the row in `queued` with no worker behind it, and ensure_job
+    treats `queued` as live forever."""
+
+    def _boom(text):
+        raise ArithmeticError("simulated: an InvalidOperation-shaped crash")
+
+    monkeypatch.setattr(worker_module, "parse_script", _boom)
+
+    _user, meld = await _meld_with_story(db)
+    job = await _queue_script_job(db, meld)
+    job_id = job.id
+
+    outcome = await run_generate_script(db, job_id)
+    assert outcome.state is JobState.FAILED
+    assert outcome.retryable is False
+
+    db.expire_all()
+    reloaded = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one()
+    assert reloaded.state is JobState.FAILED
+    assert reloaded.error

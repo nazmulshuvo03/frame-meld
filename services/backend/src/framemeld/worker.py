@@ -78,6 +78,14 @@ async def run_generate_script(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
             return JobOutcome(JobState.QUEUED, retryable=True)
         await mark_failed(db, job, str(exc))
         return JobOutcome(JobState.FAILED, retryable=False)
+    except Exception:
+        # Anything unforeseen still has to leave the row in a state a user
+        # can act on. An exception escaping here rolls back mark_running,
+        # stranding the job in `queued` with no worker behind it and no way
+        # to re-enqueue it, because ensure_job treats `queued` as live.
+        logger.exception("generate_script crashed for job %s", job.id)
+        await mark_failed(db, job, "Generating the script failed unexpectedly. Try again.")
+        return JobOutcome(JobState.FAILED, retryable=False)
 
     await apply_script(db, meld, draft, job.input_hash)
 

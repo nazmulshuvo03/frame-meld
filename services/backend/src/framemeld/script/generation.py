@@ -141,6 +141,13 @@ class DraftShot(BaseModel):
             parsed = Decimal(str(value))
         except (InvalidOperation, TypeError):
             parsed = MIN_SHOT_SECONDS
+        # NaN and the infinities survive Decimal(str(...)) — json.loads
+        # accepts NaN/Infinity by default — and then raise InvalidOperation
+        # from the comparison below. That is an ArithmeticError, not a
+        # ProviderError, and would escape the worker's except clause
+        # entirely if left unguarded here.
+        if not parsed.is_finite():
+            parsed = MIN_SHOT_SECONDS
         clamped = min(max(parsed, MIN_SHOT_SECONDS), MAX_SHOT_SECONDS)
         return clamped.quantize(Decimal("0.01"))
 
