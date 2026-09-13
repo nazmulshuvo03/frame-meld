@@ -9,6 +9,7 @@ from framemeld.cast.hashes import (
     character_image_input_hash,
     characters_input_hash,
     content_hash_for_character_image,
+    visual_hash_for_character,
 )
 from framemeld.credits.service import balance, grant, hold
 from framemeld.jobs.service import ensure_job
@@ -277,7 +278,9 @@ async def _arrange_image(db, monkeypatch, provider=None, *, held=IMAGE_QUOTE):
         (await db.execute(select(Character).order_by(Character.order_index))).scalars().first()
     )
 
-    input_hash = character_image_input_hash(character.content_hash, CharacterImageKind.SHEET)
+    input_hash = character_image_input_hash(
+        visual_hash_for_character(character), CharacterImageKind.SHEET
+    )
     image = CharacterImage(
         character_id=character.id,
         kind=CharacterImageKind.SHEET,
@@ -412,7 +415,9 @@ async def test_two_characters_get_two_different_sheets(db, monkeypatch):
         (await db.execute(select(Character).order_by(Character.order_index))).scalars().all()
     )
     second = characters[1]
-    input_hash = character_image_input_hash(second.content_hash, CharacterImageKind.SHEET)
+    input_hash = character_image_input_hash(
+        visual_hash_for_character(second), CharacterImageKind.SHEET
+    )
     image = CharacterImage(
         character_id=second.id,
         kind=CharacterImageKind.SHEET,

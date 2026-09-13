@@ -32,10 +32,17 @@ export function CharacterCard({
   onSaved: (character: Character) => void;
   onGenerateSheet: (character: Character) => void;
 }) {
-  // The card owns its character after mount, exactly as ShotCard owns its
-  // shot: re-syncing from the parent on every refetch would yank half-typed
-  // text out from under the user.
+  // The card owns the *editable* fields after mount, exactly as ShotCard
+  // owns its shot: re-syncing from the parent on every refetch would yank
+  // half-typed text out from under the user.
   const [character, setCharacter] = useState(initial);
+
+  // The sheet is the exception, and it is read from the prop rather than
+  // from the state above. It is server-owned -- nobody types it -- and a
+  // generation finishing is precisely a refetch the user must see. Holding
+  // it in local state meant a sheet appeared only after a manual page
+  // reload, which is the failure this stage exists to avoid.
+  const sheet = initial.sheet;
 
   // The whole character is the autosave value. useAutosave compares by
   // identity, so this only fires when `edit` below produces a new object.
@@ -57,7 +64,6 @@ export function CharacterCard({
   const edit = <K extends keyof Character>(field: K, value: Character[K]) =>
     setCharacter((current) => ({ ...current, [field]: value }));
 
-  const sheet = character.sheet;
   const drawing = sheet?.state === "generating";
 
   return (

@@ -9,6 +9,7 @@ from framemeld.cast.hashes import (
     character_image_input_hash,
     characters_input_hash,
     content_hash_for_character,
+    visual_hash_for_character,
 )
 from framemeld.credits.pricing import quote_for
 from framemeld.credits.service import hold
@@ -18,6 +19,7 @@ from framemeld.models.cast import Character, CharacterImage, CharacterImageKind
 from framemeld.models.job import Job, JobKind
 from framemeld.models.script import ArtifactState
 from framemeld.moderation.service import Blocked, check_and_record
+from framemeld.staleness import recompute_staleness
 
 
 class EmptyStory(Exception):
@@ -142,7 +144,9 @@ async def request_sheet(
     if not verdict.allowed:
         raise Blocked(verdict.reason or "This description can't be used to generate an image.")
 
-    input_hash = character_image_input_hash(character.content_hash, CharacterImageKind.SHEET)
+    input_hash = character_image_input_hash(
+        visual_hash_for_character(character), CharacterImageKind.SHEET
+    )
 
     # One sheet row per character, rewritten in place on regeneration. The
     # row is created before the job so target_id is stable across retries
@@ -240,4 +244,10 @@ async def update_character(
     character.updated_at = now
     meld.updated_at = now
     await db.flush()
+
+    # An edit here is an upstream change for this character's artwork, the
+    # same way a story edit is for the cast. Without this the sheet drawn
+    # from an old `appearance` would keep claiming to be fresh -- which is
+    # the milestone's headline promise, silently not happening.
+    await recompute_staleness(db, meld_id)
     return character

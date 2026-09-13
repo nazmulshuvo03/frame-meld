@@ -8,6 +8,7 @@ from framemeld.cast.hashes import (
     characters_input_hash,
     content_hash_for_character,
     content_hash_for_character_image,
+    visual_hash_for_character,
 )
 from framemeld.config import settings
 from framemeld.jobs.service import ensure_job
@@ -257,7 +258,9 @@ async def _meld_with_cast(db, story_text="Elena and Marcus find a letter.", coun
             kind=CharacterImageKind.SHEET,
             is_canonical=True,
             content_hash=content_hash_for_character_image(f"{index}" * 64),
-            input_hash=character_image_input_hash(character.content_hash, CharacterImageKind.SHEET),
+            input_hash=character_image_input_hash(
+                visual_hash_for_character(character), CharacterImageKind.SHEET
+            ),
             state=ArtifactState.FRESH,
         )
         db.add(image)
@@ -406,3 +409,52 @@ async def test_a_story_edited_mid_job_leaves_the_new_cast_stale(db, monkeypatch)
     )
     assert characters
     assert all(character.state is ArtifactState.STALE for character in characters)
+
+
+async def test_editing_a_backstory_does_not_invalidate_the_artwork(db):
+    """The reason `appearance` is a separate column from `description`
+    (models/cast.py): rewriting who someone is must not cost the user a
+    picture of what they look like. A sheet is drawn from `appearance`
+    alone, so nothing else may appear in its input_hash.
+
+    Found by the M3 browser pass, not by review: the cast stage's whole
+    claim is that it does not charge you twice for the same picture.
+    """
+    _user, meld, characters = await _meld_with_cast(db)
+    first = characters[0]
+
+    first.description = "Actually, she was the one who wrote the letter."
+    first.name = "Elena Vasquez"
+    first.role = CharacterRole.SUPPORTING
+    first.content_hash = content_hash_for_character(first)
+    await db.flush()
+
+    report = await recompute_staleness(db, meld.id)
+
+    assert report.stale_sheets == 0
+    assert all(sheet.state is ArtifactState.FRESH for sheet in await _sheets(db))
+
+
+async def test_editing_an_appearance_through_the_api_marks_the_sheet_stale(
+    logged_in, db, monkeypatch
+):
+    """The other half, end to end: an edit that really does change what
+    gets drawn has to reach recompute_staleness. Editing a character used
+    to skip it entirely, so the sheet quietly claimed to be fresh forever.
+    """
+    from framemeld.cast import service as cast_service
+
+    _user, meld, characters = await _meld_with_cast(db)
+    first = characters[0]
+
+    await cast_service.update_character(
+        db,
+        meld.user_id,
+        meld.id,
+        first.id,
+        {"appearance": "Now with close-cropped hair and a scar over one eye."},
+    )
+
+    first_sheet, second_sheet = await _sheets(db)
+    assert first_sheet.state is ArtifactState.STALE
+    assert second_sheet.state is ArtifactState.FRESH

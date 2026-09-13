@@ -82,13 +82,37 @@ def characters_input_hash(story_content_hash: str) -> str:
     )
 
 
-def character_image_input_hash(character_content_hash: str, kind: CharacterImageKind) -> str:
+def visual_hash_for_character(character: Character) -> str:
+    """The part of a character an image is actually drawn from.
+
+    A *projection* of the character, not the whole of it, and that is the
+    point. sheet_prompt() is built from `appearance` and nothing else -- the
+    image model never sees the name, the role or the backstory -- so an
+    input_hash covering those fields would claim a dependency that does not
+    exist, and an edit to any of them would invalidate artwork that would
+    come back byte-identical.
+
+    That is precisely what splitting `appearance` out of `description` was
+    for (see models/cast.py): rewriting who someone is must not cost the
+    user a picture of what they look like.
+
+    Spec 4.1's rule is that downstream keys on upstream's content_hash and
+    never on its input_hash. Narrowing to the fields that genuinely produced
+    the row honours that rule rather than bending it -- this is still
+    upstream's current content, just the part of it that is upstream *of
+    this artifact*. Widen it the day a sheet prompt starts using another
+    field, and every existing sheet correctly goes stale.
+    """
+    return canonical_hash({"kind": "character_visual", "appearance": character.appearance})
+
+
+def character_image_input_hash(character_visual_hash: str, kind: CharacterImageKind) -> str:
     """What would produce this image right now.
 
-    Keyed on the character's content_hash -- what they look like now -- not
-    on their input_hash. That is the whole point of the two-hash split: a
-    human rewriting `appearance` must invalidate the sheet, and editing
-    never changes an input_hash.
+    Keyed on the character's *visual* hash -- what they look like now --
+    never on their input_hash. Editing never changes an input_hash, so a
+    human rewriting `appearance` must invalidate the sheet through the
+    content side, which is what visual_hash_for_character above provides.
 
     Reads the *image* provider settings, not the LLM's: changing
     LLM_MODEL must not invalidate artwork no language model produced.
@@ -97,7 +121,7 @@ def character_image_input_hash(character_content_hash: str, kind: CharacterImage
         {
             "kind": "character_image",
             "image_kind": kind.value,
-            "character_content_hash": character_content_hash,
+            "character_visual_hash": character_visual_hash,
             "provider": settings.image_provider,
             "model": settings.image_model,
             "params": SHEET_PARAMS,

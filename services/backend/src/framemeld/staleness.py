@@ -5,7 +5,11 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
-from framemeld.cast.hashes import character_image_input_hash, characters_input_hash
+from framemeld.cast.hashes import (
+    character_image_input_hash,
+    characters_input_hash,
+    visual_hash_for_character,
+)
 from framemeld.models.cast import Character, CharacterImage
 from framemeld.models.meld import Meld, Story
 from framemeld.models.script import ArtifactState, Scene, Shot
@@ -114,7 +118,7 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
         if owner is None:
             continue
         changed += _reconcile(
-            image, character_image_input_hash(owner.content_hash, image.kind), now
+            image, character_image_input_hash(visual_hash_for_character(owner), image.kind), now
         )
 
     if changed:
