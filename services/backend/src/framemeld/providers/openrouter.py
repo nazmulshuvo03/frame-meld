@@ -112,11 +112,23 @@ class OpenRouterLLMProvider:
 
 def _reported_cost(body: dict[str, Any]) -> Decimal:
     """What the provider says the call cost. Free models omit it entirely,
-    which is zero — not an error, and not a reason to guess."""
+    which is zero — not an error, and not a reason to guess.
+
+    Non-finite values are rejected rather than passed through: json.loads
+    accepts the non-standard NaN and Infinity literals, and Decimal(str(...))
+    builds both without complaint. From M3 this number is what credit
+    settlement subtracts from a balance, where a NaN would make every
+    comparison silently false and an Infinity would corrupt the balance.
+    Zero is the safe reading of a cost we cannot trust — it under-charges
+    rather than over-charges, and the raw response is kept for the audit.
+    """
     raw = (body.get("usage") or {}).get("cost")
     if raw is None:
         return Decimal("0")
     try:
-        return Decimal(str(raw))
+        cost = Decimal(str(raw))
     except InvalidOperation:
         return Decimal("0")
+    if not cost.is_finite() or cost < 0:
+        return Decimal("0")
+    return cost

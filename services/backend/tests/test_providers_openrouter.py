@@ -6,6 +6,7 @@ import pytest
 
 from framemeld.config import settings
 from framemeld.providers.base import (
+    ProviderError,
     ProviderRefusedError,
     ProviderResponseError,
     ProviderTransportError,
@@ -62,14 +63,37 @@ async def test_a_free_model_reporting_no_cost_is_zero_not_an_error(monkeypatch):
     assert result.cost_usd == Decimal("0")
 
 
-@pytest.mark.parametrize("status_code", [429, 500, 502, 503])
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity", "not-a-number", -1])
+async def test_an_untrustworthy_cost_reads_as_zero(bad, monkeypatch):
+    """json.loads accepts NaN and Infinity, and Decimal(str(...)) builds
+    both without complaint. From M3 this number debits a real balance, so a
+    non-finite or negative reading must fall back to zero rather than
+    survive into ProviderResult.cost_usd."""
+    from decimal import Decimal
+
+    # NaN/Infinity are not valid JSON, so httpx.Response(json=...) would
+    # refuse to serialise them. Build the body as raw text instead, both to
+    # cover those cases and to reproduce what a provider can actually send
+    # and what httpx (via Python's non-standard-tolerant json module) will
+    # actually parse.
+    cost_literal = bad if bad in ("NaN", "Infinity", "-Infinity") else json.dumps(bad)
+    body_text = (
+        '{"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}], '
+        '"usage": {"cost": ' + cost_literal + "}}"
+    )
+    provider = _provider(lambda request: httpx.Response(200, text=body_text), monkeypatch)
+    result = await provider.complete(system="s", user="u", json_schema={})
+    assert result.cost_usd == Decimal("0")
+
+
+@pytest.mark.parametrize("status_code", [408, 409, 425, 429, 500])
 async def test_transient_statuses_are_retryable(status_code, monkeypatch):
     provider = _provider(lambda request: httpx.Response(status_code, json={}), monkeypatch)
     with pytest.raises(ProviderTransportError):
         await provider.complete(system="s", user="u", json_schema={})
 
 
-@pytest.mark.parametrize("status_code", [400, 401, 403, 404, 422])
+@pytest.mark.parametrize("status_code", [400, 401, 402, 403, 404, 422])
 async def test_client_errors_are_terminal(status_code, monkeypatch):
     provider = _provider(lambda request: httpx.Response(status_code, json={}), monkeypatch)
     with pytest.raises(ProviderResponseError) as caught:
@@ -98,12 +122,27 @@ async def test_an_empty_choices_list_is_a_response_error(monkeypatch):
         await provider.complete(system="s", user="u", json_schema={})
 
 
-async def test_errors_never_quote_the_api_key(monkeypatch):
-    """An adapter error ends up in jobs.error, which is shown to the user."""
-    provider = _provider(
-        lambda request: httpx.Response(401, text="bad key sk-test-key"), monkeypatch
-    )
-    with pytest.raises(ProviderResponseError) as caught:
+def _raise_connect_error_quoting_the_key(request: httpx.Request) -> httpx.Response:
+    # Contrived, but it is what proves the network branch does not
+    # stringify whatever exception it was given rather than its own
+    # fixed message.
+    raise httpx.ConnectError("failed to reach host with sk-test-key")
+
+
+@pytest.mark.parametrize(
+    ("name", "handler"),
+    [
+        ("client error", lambda request: httpx.Response(401, text="bad key sk-test-key")),
+        ("server error", lambda request: httpx.Response(500, text="upstream said sk-test-key")),
+        ("network failure", _raise_connect_error_quoting_the_key),
+    ],
+)
+async def test_no_error_path_quotes_the_api_key(name, handler, monkeypatch):
+    """Adapter errors reach the user through jobs.error, which is rendered
+    in the UI. A 401's body can echo the key straight back, and so can a
+    proxy's 502 — so this is a property of every error path, not of one."""
+    provider = _provider(handler, monkeypatch)
+    with pytest.raises(ProviderError) as caught:
         await provider.complete(system="s", user="u", json_schema={})
     assert "sk-test-key" not in str(caught.value)
 
