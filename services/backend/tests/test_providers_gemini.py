@@ -52,6 +52,55 @@ async def test_the_request_carries_the_key_and_the_schema(monkeypatch):
     assert seen["body"]["contents"][0]["parts"][0]["text"] == "usr"
 
 
+async def test_unsupported_schema_keywords_are_stripped_before_sending(monkeypatch):
+    """Verified live against the real API (2026-09-13): generateContent's
+    responseSchema rejects additionalProperties outright, and the request
+    still 400s generically until minimum/maximum/minItems/maxItems are also
+    gone. None of these are lost -- framemeld.script.generation's Pydantic
+    validators already clamp these bounds rather than trust the model."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return _ok("{}")
+
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "shots": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "duration_sec": {"type": "number", "minimum": 0.5, "maximum": 5.0}
+                    },
+                },
+            }
+        },
+    }
+    await _provider(handler, monkeypatch).complete(
+        system="s", user="u", json_schema={"schema": schema}
+    )
+
+    sent = seen["body"]["generationConfig"]["responseSchema"]
+    assert sent == {
+        "type": "object",
+        "properties": {
+            "shots": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"duration_sec": {"type": "number"}},
+                },
+            }
+        },
+    }
+
+
 async def test_a_missing_schema_body_omits_responseschema(monkeypatch):
     """json_schema={} is what the client-error and network-failure tests
     below pass -- the adapter must not crash building the request just

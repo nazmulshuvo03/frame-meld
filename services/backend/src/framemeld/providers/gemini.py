@@ -22,6 +22,33 @@ _RETRYABLE_STATUSES = frozenset({408, 409, 425, 429})
 #: retrying asks the same safety filter the same question again.
 _REFUSAL_FINISH_REASONS = frozenset({"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"})
 
+#: generateContent's responseSchema is the older, narrower Gemini Schema
+#: proto, not the OpenAPI-3.0 draft OpenAI's json_schema wrapper assumes.
+#: Verified live (2026-09-13, gemini-3.5-flash-lite): additionalProperties
+#: is rejected outright ("Unknown name ... Cannot find field"), and
+#: minimum/maximum/minItems/maxItems are silently part of the same
+#: rejection once additionalProperties is removed -- the request 400s
+#: generically until all four are gone. None of these bounds are lost:
+#: framemeld.script.generation's Pydantic validators (_clamp_duration,
+#: _truncate_to_max_shots, the enum fallbacks) already clamp rather than
+#: trust the model, so dropping them from the schema removes a hint to the
+#: model, not the actual guarantee.
+_UNSUPPORTED_SCHEMA_KEYS = frozenset(
+    {"additionalProperties", "minimum", "maximum", "minItems", "maxItems"}
+)
+
+
+def _for_gemini(schema: object) -> object:
+    if isinstance(schema, dict):
+        return {
+            key: _for_gemini(value)
+            for key, value in schema.items()
+            if key not in _UNSUPPORTED_SCHEMA_KEYS
+        }
+    if isinstance(schema, list):
+        return [_for_gemini(item) for item in schema]
+    return schema
+
 
 class GeminiLLMProvider:
     name = "gemini"
@@ -43,7 +70,7 @@ class GeminiLLMProvider:
         # adapter. Gemini's responseSchema wants only the inner schema body.
         schema_body = json_schema.get("schema")
         if schema_body is not None:
-            generation_config["responseSchema"] = schema_body
+            generation_config["responseSchema"] = _for_gemini(schema_body)
 
         payload = {
             "contents": [{"role": "user", "parts": [{"text": user}]}],

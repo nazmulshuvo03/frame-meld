@@ -80,13 +80,19 @@ FRAMEMELD_LIVE_LLM=1 conda run --no-capture-output -n framemeld \
   pytest tests/test_providers_openrouter.py -k real -v
 ```
 
-**The same question, unresolved differently, now applies to Gemini too.** `LLM_PROVIDER`
-defaults to `gemini` as of Task 16 (see *Notable decisions* below). The "Gemini rejects
-`additionalProperties`" note above was observed through OpenRouter's proxy layer, which
-may reshape the schema before it reaches the model — it is not evidence about Gemini's
-own native `generationConfig.responseSchema` handling, which has never been called
-either. `GEMINI_API_KEY` is present but empty in `.env`; settle it with
-`FRAMEMELD_LIVE_LLM=1 conda run --no-capture-output -n framemeld pytest tests/test_providers_gemini.py -k real -v`
+**Settled for Gemini (2026-09-13), during M2's browser verification pass.** A real key
+was added and a real Meld was generated end to end in a running instance. It 400'd on
+the first attempt: `generateContent`'s `responseSchema` is the older, narrower Gemini
+Schema proto, not the OpenAPI-3.0 draft the OpenAI-style wrapper assumes, and rejected
+`additionalProperties` outright — then kept 400ing generically until `minimum`,
+`maximum`, `minItems` and `maxItems` were also stripped. `GeminiLLMProvider` now sends a
+sanitised copy of the schema (`_for_gemini` in `providers/gemini.py`); nothing is lost by
+dropping these keywords, since `script/generation.py`'s Pydantic validators already
+clamp duration and shot count rather than trust the model. Reproduced with
+`FRAMEMELD_LIVE_LLM=1 conda run --no-capture-output -n framemeld pytest tests/test_providers_gemini.py -k real -v`,
+which now passes against the real API. The OpenRouter question above is unaffected —
+still genuinely unsettled, since OpenRouter's proxy layer may reshape the schema
+differently before it reaches whichever model is configured.
 once a real key is in place.
 
 **Task 11's fix round was never re-reviewed.** The code and its fixes are committed and
