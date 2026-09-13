@@ -1,6 +1,7 @@
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 from arq.connections import RedisSettings
@@ -9,19 +10,25 @@ from arq.worker import Retry
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
+from framemeld.assets.service import store_asset
 from framemeld.cast.generation import (
     CHARACTERS_JSON_SCHEMA,
     apply_characters,
     build_character_messages,
     parse_characters,
+    sheet_prompt,
 )
+from framemeld.cast.hashes import SHEET_PARAMS, content_hash_for_character_image
 from framemeld.config import settings
 from framemeld.credits.service import refund, settle
 from framemeld.db import SessionLocal
 from framemeld.jobs.service import mark_failed, mark_for_retry, mark_running, mark_succeeded
+from framemeld.models.cast import Character, CharacterImage
 from framemeld.models.job import Job, JobState
 from framemeld.models.meld import Meld, Story
-from framemeld.providers.base import ProviderError
+from framemeld.models.script import ArtifactState
+from framemeld.providers.base import ProviderError, ProviderResponseError
+from framemeld.providers.images.registry import get_image_provider
 from framemeld.providers.registry import get_llm_provider
 from framemeld.script.generation import (
     SCRIPT_JSON_SCHEMA,
@@ -36,6 +43,12 @@ logger = logging.getLogger(__name__)
 #: Spec section 5.4: three attempts. Counted on the job row rather than in
 #: arq, so a redelivery after a worker crash cannot restart the budget.
 MAX_ATTEMPTS = 3
+
+#: The formats an image provider may hand back. Anything else is a
+#: response this codebase cannot store under a name a browser will
+#: recognise, so it is a terminal response error rather than a file called
+#: ".bin" that renders as a broken image forever.
+_IMAGE_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 
 
 @dataclass(frozen=True)
@@ -250,10 +263,105 @@ async def generate_characters(ctx: dict[str, Any], job_id: str) -> str:
     return outcome.state.value
 
 
+async def run_generate_character_image(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
+    job = await mark_running(db, job_id)
+    if job is None:
+        existing = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
+        state = JobState.CANCELLED if existing is None else existing.state
+        return JobOutcome(state, retryable=False)
+
+    image = (
+        await db.execute(select(CharacterImage).where(CharacterImage.id == job.target_id))
+    ).scalar_one_or_none()
+    character = (
+        None
+        if image is None
+        else (
+            await db.execute(select(Character).where(Character.id == image.character_id))
+        ).scalar_one_or_none()
+    )
+    meld = (await db.execute(select(Meld).where(Meld.id == job.meld_id))).scalar_one_or_none()
+    if image is None or character is None or meld is None:
+        await mark_failed(db, job, "This character no longer exists.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    provider = get_image_provider()
+    try:
+        result = await provider.generate(
+            prompt=sheet_prompt(character), refs=[], params=SHEET_PARAMS
+        )
+        if not result.bytes_:
+            raise ProviderResponseError("The image model returned no image.")
+        extension = _IMAGE_EXTENSIONS.get(str(result.raw.get("mimeType", "image/png")))
+        if extension is None:
+            raise ProviderResponseError("The image model returned a format we cannot store.")
+    except ProviderError as exc:
+        logger.warning("generate_character_image failed for job %s: %s", job.id, exc)
+        if exc.retryable and job.attempts < MAX_ATTEMPTS:
+            await mark_for_retry(db, job, str(exc))
+            return JobOutcome(JobState.QUEUED, retryable=True)
+        image.state = ArtifactState.FAILED
+        image.updated_at = datetime.now(UTC)
+        await mark_failed(db, job, str(exc))
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+    except Exception:
+        logger.exception("generate_character_image crashed for job %s", job.id)
+        image.state = ArtifactState.FAILED
+        image.updated_at = datetime.now(UTC)
+        await mark_failed(db, job, "Generating the sheet failed unexpectedly. Try again.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    mime = str(result.raw.get("mimeType", "image/png"))
+    asset = await store_asset(
+        db, user_id=meld.user_id, data=result.bytes_, mime=mime, ext=extension
+    )
+
+    now = datetime.now(UTC)
+    image.asset_id = asset.id
+    image.content_hash = content_hash_for_character_image(asset.sha256)
+    image.input_hash = job.input_hash
+    image.state = ArtifactState.FRESH
+    image.provider = result.provider
+    image.model = result.model
+    image.params = dict(SHEET_PARAMS)
+    image.credits_spent = job.credits_held
+    image.updated_at = now
+
+    job.cost_usd = result.cost_usd
+    # The user may have edited the character's appearance while this ran.
+    # Same rule as the script stage: rows carrying a hash that is no longer
+    # current must say stale rather than claim fresh.
+    await recompute_staleness(db, job.meld_id)
+    await _close_hold(db, job, succeeded=True)
+    await mark_succeeded(db, job)
+    return JobOutcome(JobState.SUCCEEDED, retryable=False)
+
+
+async def generate_character_image(ctx: dict[str, Any], job_id: str) -> str:
+    """The arq task. Same shape as generate_characters."""
+    async with SessionLocal() as db:
+        outcome = await run_generate_character_image(db, uuid.UUID(job_id))
+        attempts = (
+            await db.execute(select(Job.attempts).where(Job.id == uuid.UUID(job_id)))
+        ).scalar_one_or_none()
+        await db.commit()
+
+    if outcome.retryable:
+        raise Retry(defer=2 ** (attempts or 1))
+    return outcome.state.value
+
+
 class WorkerSettings:
     """arq's entry point: `arq framemeld.worker.WorkerSettings`."""
 
-    functions: ClassVar[list[WorkerCoroutine]] = [generate_script, generate_characters]
+    functions: ClassVar[list[WorkerCoroutine]] = [
+        generate_script,
+        generate_characters,
+        generate_character_image,
+    ]
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     #: arq checks `job_try > max_tries` before executing, so this gates the
     #: explicit Retry above, not just arq's own automatic retries. Set below

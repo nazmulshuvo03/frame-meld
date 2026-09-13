@@ -1,14 +1,20 @@
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 import framemeld.worker as worker_module
-from framemeld.cast.hashes import characters_input_hash
+from framemeld.assets.service import png_dimensions
+from framemeld.cast.hashes import (
+    character_image_input_hash,
+    characters_input_hash,
+    content_hash_for_character_image,
+)
 from framemeld.credits.service import balance, grant, hold
 from framemeld.jobs.service import ensure_job
 from framemeld.melds import service as melds_service
-from framemeld.models.cast import Character
+from framemeld.models.asset import Asset
+from framemeld.models.cast import Character, CharacterImage, CharacterImageKind
 from framemeld.models.job import Job, JobKind, JobState
 from framemeld.models.script import ArtifactState
 from framemeld.models.user import User
@@ -17,8 +23,10 @@ from framemeld.providers.base import (
     ProviderResult,
     ProviderTransportError,
 )
+from framemeld.providers.images.stub import StubImageProvider, solid_png
 from framemeld.script.hashes import content_hash_for_story
-from framemeld.worker import run_generate_characters
+from framemeld.storage.registry import get_storage
+from framemeld.worker import run_generate_character_image, run_generate_characters
 
 STORY = (
     "Elena found the letter beneath the floorboard. She read it twice. "
@@ -229,3 +237,218 @@ async def test_a_bad_response_shape_is_terminal_and_refunds(db, monkeypatch):
 async def test_an_unknown_job_is_cancelled_rather_than_crashing(db):
     outcome = await run_generate_characters(db, uuid.uuid4())
     assert outcome.state is JobState.CANCELLED
+
+
+class _FakeImageProvider:
+    name = "fake-image"
+    model = "fake-image-model"
+
+    def __init__(self, data=None, error=None, mime="image/png", cost=Decimal("0.039")):
+        self._data = data
+        self._error = error
+        self._mime = mime
+        self._cost = cost
+        self.prompts: list[str] = []
+
+    async def generate(self, *, prompt, refs, params):
+        self.prompts.append(prompt)
+        if self._error is not None:
+            raise self._error
+        data = self._data if self._data is not None else solid_png(16, 16, (7, 8, 9))
+        return ProviderResult(
+            text=None,
+            bytes_=data,
+            cost_usd=self._cost,
+            provider=self.name,
+            model=self.model,
+            raw={"mimeType": self._mime},
+        )
+
+
+IMAGE_QUOTE = 12
+
+
+async def _arrange_image(db, monkeypatch, provider=None, *, held=IMAGE_QUOTE):
+    """A Meld with a cast, and one empty CharacterImage row with a hold
+    against it -- the state Task 12's API leaves behind."""
+    user, _meld, cast_job, _ = await _arrange(db, monkeypatch)
+    await run_generate_characters(db, cast_job.id)
+    character = (
+        (await db.execute(select(Character).order_by(Character.order_index))).scalars().first()
+    )
+
+    input_hash = character_image_input_hash(character.content_hash, CharacterImageKind.SHEET)
+    image = CharacterImage(
+        character_id=character.id,
+        kind=CharacterImageKind.SHEET,
+        is_canonical=True,
+        input_hash=input_hash,
+        state=ArtifactState.EMPTY,
+    )
+    db.add(image)
+    await db.flush()
+
+    dispatch = await ensure_job(
+        db,
+        meld_id=cast_job.meld_id,
+        kind=JobKind.GENERATE_CHARACTER_IMAGE,
+        target_table="character_images",
+        target_id=image.id,
+        input_hash=input_hash,
+    )
+    job = dispatch.job
+    if held:
+        await hold(
+            db,
+            user_id=user.id,
+            job_id=job.id,
+            meld_id=cast_job.meld_id,
+            credits=held,
+            description="sheet",
+        )
+        job.credits_held = held
+        await db.flush()
+
+    provider = provider or _FakeImageProvider()
+    monkeypatch.setattr(worker_module, "get_image_provider", lambda: provider)
+    return user, character, image, job, provider
+
+
+async def test_a_generated_sheet_is_stored_and_linked(db, monkeypatch):
+    user, character, image, job, provider = await _arrange_image(db, monkeypatch)
+    balance_before = await balance(db, user.id)
+
+    outcome = await run_generate_character_image(db, job.id)
+
+    assert outcome.state is JobState.SUCCEEDED
+    asset = (await db.execute(select(Asset))).scalar_one()
+    assert image.asset_id == asset.id
+    assert image.state is ArtifactState.FRESH
+    assert image.content_hash == content_hash_for_character_image(asset.sha256)
+    assert image.provider == "fake-image"
+    # The sheet is drawn from appearance, never from the plot.
+    assert character.appearance[:20] in provider.prompts[0]
+    assert await balance(db, user.id) == balance_before
+
+
+async def test_the_stored_bytes_are_a_real_image(db, monkeypatch):
+    """png_dimensions reads the IHDR, so this fails if the pipeline ever
+    stores something that is not the image the provider returned."""
+    _user, _character, _image, job, _ = await _arrange_image(db, monkeypatch)
+
+    await run_generate_character_image(db, job.id)
+
+    asset = (await db.execute(select(Asset))).scalar_one()
+    stored = await get_storage().get(key=asset.storage_key)
+    assert png_dimensions(stored) == (16, 16)
+    assert asset.width == 16
+    assert asset.height == 16
+
+
+async def test_credits_spent_records_what_was_held(db, monkeypatch):
+    _user, _character, image, job, _ = await _arrange_image(db, monkeypatch)
+
+    await run_generate_character_image(db, job.id)
+
+    assert image.credits_spent == IMAGE_QUOTE
+
+
+async def test_a_failed_sheet_stores_nothing_and_refunds(db, monkeypatch):
+    """A half-generated image is worse than none: it would show up in the
+    gallery as the user's paid-for artwork."""
+    user, _character, image, job, _ = await _arrange_image(
+        db, monkeypatch, provider=_FakeImageProvider(error=ProviderRefusedError("no"))
+    )
+    balance_before = await balance(db, user.id)
+
+    outcome = await run_generate_character_image(db, job.id)
+
+    assert outcome.state is JobState.FAILED
+    assert (await db.execute(select(Asset))).scalars().all() == []
+    assert image.state is ArtifactState.FAILED
+    assert image.asset_id is None
+    assert await balance(db, user.id) == balance_before + IMAGE_QUOTE
+
+
+async def test_an_unstorable_format_is_terminal(db, monkeypatch):
+    """A file called '.bin' renders as a broken image forever. Better to
+    refuse it and give the credits back."""
+    user, _character, image, job, _ = await _arrange_image(
+        db, monkeypatch, provider=_FakeImageProvider(mime="image/x-nonsense")
+    )
+    balance_before = await balance(db, user.id)
+
+    outcome = await run_generate_character_image(db, job.id)
+
+    assert outcome.state is JobState.FAILED
+    assert outcome.retryable is False
+    assert image.state is ArtifactState.FAILED
+    assert (await db.execute(select(Asset))).scalars().all() == []
+    assert await balance(db, user.id) == balance_before + IMAGE_QUOTE
+
+
+async def test_a_transport_failure_retries_without_refunding(db, monkeypatch):
+    user, _character, image, job, _ = await _arrange_image(
+        db, monkeypatch, provider=_FakeImageProvider(error=ProviderTransportError("timeout"))
+    )
+    balance_before = await balance(db, user.id)
+
+    outcome = await run_generate_character_image(db, job.id)
+
+    assert outcome.state is JobState.QUEUED
+    assert outcome.retryable is True
+    # Not FAILED: the row is still on its way, and the hold stands.
+    assert image.state is ArtifactState.EMPTY
+    assert await balance(db, user.id) == balance_before
+
+
+async def test_two_characters_get_two_different_sheets(db, monkeypatch):
+    """A shared asset would mean every character in a Meld wore the same
+    face."""
+    _user, _character, _image, first_job, _ = await _arrange_image(db, monkeypatch)
+    await run_generate_character_image(db, first_job.id)
+
+    characters = (
+        (await db.execute(select(Character).order_by(Character.order_index))).scalars().all()
+    )
+    second = characters[1]
+    input_hash = character_image_input_hash(second.content_hash, CharacterImageKind.SHEET)
+    image = CharacterImage(
+        character_id=second.id,
+        kind=CharacterImageKind.SHEET,
+        is_canonical=True,
+        input_hash=input_hash,
+        state=ArtifactState.EMPTY,
+    )
+    db.add(image)
+    await db.flush()
+    dispatch = await ensure_job(
+        db,
+        meld_id=first_job.meld_id,
+        kind=JobKind.GENERATE_CHARACTER_IMAGE,
+        target_table="character_images",
+        target_id=image.id,
+        input_hash=input_hash,
+    )
+    # A provider whose bytes follow the prompt, so two different characters
+    # cannot accidentally share one picture.
+    monkeypatch.setattr(worker_module, "get_image_provider", StubImageProvider)
+
+    await run_generate_character_image(db, dispatch.job.id)
+
+    assets = (await db.execute(select(Asset))).scalars().all()
+    assert len(assets) == 2
+    assert assets[0].storage_key != assets[1].storage_key
+    assert assets[0].sha256 != assets[1].sha256
+
+
+async def test_a_vanished_character_fails_and_refunds(db, monkeypatch):
+    user, character, _image, job, _ = await _arrange_image(db, monkeypatch)
+    balance_before = await balance(db, user.id)
+    await db.execute(delete(Character).where(Character.id == character.id))
+    await db.flush()
+
+    outcome = await run_generate_character_image(db, job.id)
+
+    assert outcome.state is JobState.FAILED
+    assert await balance(db, user.id) == balance_before + IMAGE_QUOTE
