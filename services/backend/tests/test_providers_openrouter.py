@@ -116,6 +116,19 @@ async def test_a_content_filter_is_a_refusal_not_a_retry(monkeypatch):
         await provider.complete(system="s", user="u", json_schema={})
 
 
+async def test_a_truncated_response_names_the_length_limit(monkeypatch):
+    """finish_reason == 'length' means the model ran out of output tokens.
+    Retrying reproduces the same truncation, so the message must say so
+    rather than the generic 'try again' that fits every other failure."""
+    body = {"choices": [{"message": {"content": "{"}, "finish_reason": "length"}]}
+    provider = _provider(lambda request: httpx.Response(200, json=body), monkeypatch)
+    with pytest.raises(ProviderResponseError) as caught:
+        await provider.complete(system="s", user="u", json_schema={})
+    assert caught.value.retryable is False
+    message = str(caught.value).lower()
+    assert "shorter" in message or "length" in message
+
+
 async def test_an_empty_choices_list_is_a_response_error(monkeypatch):
     provider = _provider(lambda request: httpx.Response(200, json={"choices": []}), monkeypatch)
     with pytest.raises(ProviderResponseError):

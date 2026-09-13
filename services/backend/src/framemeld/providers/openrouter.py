@@ -94,6 +94,16 @@ class OpenRouterLLMProvider:
             raise ProviderResponseError("The language model returned no reply.")
 
         choice = choices[0]
+        if choice.get("finish_reason") == "length":
+            # The model ran out of output tokens mid-JSON. Retrying produces
+            # the same truncation, and the generic parse failure downstream
+            # would tell the user to "try again" — the one thing that cannot
+            # work. Terminal, with the actual remedy. Checked before
+            # content_filter: both are terminal, so the order only matters
+            # for which message a response tagged with both would surface.
+            raise ProviderResponseError(
+                "The script was too long for the model to finish. Try a shorter story."
+            )
         if choice.get("finish_reason") == "content_filter":
             raise ProviderRefusedError(
                 "The language model declined to work with this story. "
