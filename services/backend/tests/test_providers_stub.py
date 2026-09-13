@@ -3,7 +3,11 @@ from decimal import Decimal
 
 import pytest
 
-from framemeld.providers.base import ProviderRefusedError
+from framemeld.providers.base import (
+    ProviderRefusedError,
+    ProviderResponseError,
+    ProviderTransportError,
+)
 from framemeld.providers.registry import get_llm_provider
 from framemeld.providers.stub import StubLLMProvider
 
@@ -71,3 +75,21 @@ def test_the_registry_rejects_an_unknown_provider(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "nope")
     with pytest.raises(ValueError, match="nope"):
         get_llm_provider()
+
+
+@pytest.mark.parametrize(
+    ("error_cls", "retryable"),
+    [
+        (ProviderTransportError, True),
+        (ProviderRefusedError, False),
+        (ProviderResponseError, False),
+    ],
+)
+def test_the_retry_verdict_matches_the_error_kind(error_cls, retryable):
+    """Task 8's worker re-queues a job on this flag alone.
+
+    Inverted, it either drops work silently or spends money retrying a
+    refusal that will refuse again — and the symptom appears in the worker,
+    nowhere near the one-character cause here.
+    """
+    assert error_cls("boom").retryable is retryable
