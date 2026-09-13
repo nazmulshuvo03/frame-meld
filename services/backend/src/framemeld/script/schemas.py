@@ -93,6 +93,11 @@ class ScenePatch(_RejectsExplicitNull, BaseModel):
     a full-object PUT would let a stale tab clobber a field it never
     touched."""
 
+    # A field this schema does not declare is one the API cannot change.
+    # Silently dropping it would return 200 for an edit that did nothing,
+    # which is a worse failure than refusing it.
+    model_config = ConfigDict(extra="forbid")
+
     heading: str | None = Field(default=None, max_length=200)
     summary: str | None = Field(default=None, max_length=4000)
     location: str | None = Field(default=None, max_length=200)
@@ -100,6 +105,11 @@ class ScenePatch(_RejectsExplicitNull, BaseModel):
 
 
 class ShotPatch(_RejectsExplicitNull, BaseModel):
+    # A field this schema does not declare is one the API cannot change.
+    # Silently dropping it would return 200 for an edit that did nothing,
+    # which is a worse failure than refusing it.
+    model_config = ConfigDict(extra="forbid")
+
     image_prompt: str | None = Field(default=None, max_length=4000)
     motion_prompt: str | None = Field(default=None, max_length=2000)
     #: Bounded by the same floor the generator clamps to, so a value the

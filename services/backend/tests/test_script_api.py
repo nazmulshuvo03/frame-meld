@@ -344,3 +344,20 @@ async def test_a_sub_hundredth_duration_is_refused(logged_in, db):
         f"/melds/{meld_id}/shots/{shot['id']}", json={"duration_sec": "0.001"}
     )
     assert response.status_code == 422
+
+
+async def test_an_unknown_patch_field_is_refused(logged_in, db):
+    """A 200 for an edit that did nothing is worse than a 422. Neither
+    ScenePatch nor ShotPatch declares `state`, and without extra="forbid"
+    pydantic would drop it silently instead of refusing it."""
+    from framemeld.worker import run_generate_script
+
+    meld_id = await _meld_with_story(logged_in)
+    job = await _generate(logged_in, meld_id)
+    await run_generate_script(db, uuid.UUID(job["id"]))
+
+    shot = (await logged_in.get(f"/melds/{meld_id}/script")).json()["scenes"][0]["shots"][0]
+    response = await logged_in.patch(
+        f"/melds/{meld_id}/shots/{shot['id']}", json={"state": "fresh"}
+    )
+    assert response.status_code == 422

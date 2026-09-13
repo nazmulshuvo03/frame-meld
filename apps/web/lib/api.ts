@@ -115,6 +115,12 @@ export const saveStory = (id: string, text: string, ifContentHash?: string) =>
     ),
   });
 
+export const CAMERA_ANGLES = ["wide", "medium", "close", "insert", "establishing"] as const;
+export const DIALOGUE_KINDS = ["none", "narration", "off_screen", "on_screen"] as const;
+
+export type CameraAngle = (typeof CAMERA_ANGLES)[number];
+export type DialogueKind = (typeof DIALOGUE_KINDS)[number];
+
 export type Shot = {
   id: string;
   order_index: number;
@@ -124,14 +130,20 @@ export type Shot = {
    *  the value goes straight back on the next edit. Parsing to a float and
    *  back would change 4.05 and make the shot look edited when it was not. */
   duration_sec: string;
-  camera: string;
-  dialogue_kind: string;
+  camera: CameraAngle;
+  dialogue_kind: DialogueKind;
   speech_text: string;
   state: string;
   content_hash: string;
   updated_at: string;
 };
 
+/** A scene's own fields — what a PATCH returns.
+ *
+ *  Without `shots`, deliberately: the API's scene-edit response omits them
+ *  (it does not load the relationship for a field edit), so a type that
+ *  promised them would be a lie the compiler cannot catch.
+ */
 export type Scene = {
   id: string;
   order_index: number;
@@ -142,11 +154,13 @@ export type Scene = {
   state: string;
   content_hash: string;
   updated_at: string;
-  shots: Shot[];
 };
 
+/** A scene with its shots — what the script listing returns. */
+export type SceneWithShots = Scene & { shots: Shot[] };
+
 export type ScriptView = {
-  scenes: Scene[];
+  scenes: SceneWithShots[];
   stale_scenes: number;
   stale_shots: number;
 };
@@ -162,9 +176,6 @@ export type Job = {
   finished_at: string | null;
 };
 
-export const CAMERA_ANGLES = ["wide", "medium", "close", "insert", "establishing"] as const;
-export const DIALOGUE_KINDS = ["none", "narration", "off_screen", "on_screen"] as const;
-
 export const getScript = (meldId: string) => request<ScriptView>(`/melds/${meldId}/script`);
 
 export const generateScript = (meldId: string) =>
@@ -173,13 +184,29 @@ export const generateScript = (meldId: string) =>
 export const getJob = (meldId: string, jobId: string) =>
   request<Job>(`/melds/${meldId}/jobs/${jobId}`);
 
-export const updateScene = (meldId: string, sceneId: string, patch: Partial<Scene>) =>
+// Narrowed to exactly what the API's ScenePatch/ShotPatch declare. A wider
+// Partial<Scene>/Partial<Shot> would let a caller pass e.g. `state` or
+// `content_hash` — fields neither patch schema declares. The backend now
+// rejects an unknown field outright (extra="forbid"), but catching the
+// mistake here, at compile time, is friendlier than a 422 at request time.
+export type ScenePatch = Partial<
+  Pick<Scene, "heading" | "summary" | "location" | "time_of_day">
+>;
+
+export type ShotPatch = Partial<
+  Pick<
+    Shot,
+    "image_prompt" | "motion_prompt" | "duration_sec" | "camera" | "dialogue_kind" | "speech_text"
+  >
+>;
+
+export const updateScene = (meldId: string, sceneId: string, patch: ScenePatch) =>
   request<Scene>(`/melds/${meldId}/scenes/${sceneId}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
   });
 
-export const updateShot = (meldId: string, shotId: string, patch: Partial<Shot>) =>
+export const updateShot = (meldId: string, shotId: string, patch: ShotPatch) =>
   request<Shot>(`/melds/${meldId}/shots/${shotId}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
