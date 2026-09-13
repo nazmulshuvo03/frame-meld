@@ -33,11 +33,10 @@ def _not_found() -> HTTPException:
 
 @router.get("/script", response_model=ScriptOut)
 async def get_script(meld_id: uuid.UUID, user: CurrentUser, db: Db) -> ScriptOut:
-    found = await service.get_script(db, user.id, meld_id)
-    if found is None:
+    scenes = await service.get_script(db, user.id, meld_id)
+    if scenes is None:
         raise _not_found()
 
-    _meld, scenes = found
     stale_scenes, stale_shots = service.count_stale(scenes)
     return ScriptOut(
         scenes=[SceneDetail.model_validate(scene) for scene in scenes],
@@ -52,7 +51,7 @@ async def generate_script(meld_id: uuid.UUID, user: CurrentUser, db: Db, jobs: J
         dispatch = await service.request_generation(db, user.id, meld_id)
     except service.EmptyStory:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Write some story first — there is nothing to turn into a script yet.",
         ) from None
     if dispatch is None:

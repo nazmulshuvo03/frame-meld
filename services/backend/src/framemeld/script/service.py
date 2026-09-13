@@ -1,6 +1,6 @@
 import uuid
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
@@ -9,7 +9,6 @@ from sqlalchemy.orm import selectinload
 from framemeld.jobs.service import JobDispatch, ensure_job
 from framemeld.melds.service import get_meld
 from framemeld.models.job import Job, JobKind
-from framemeld.models.meld import Meld
 from framemeld.models.script import ArtifactState, Scene, Shot
 from framemeld.script.hashes import content_hash_for_scene, content_hash_for_shot, script_input_hash
 
@@ -22,19 +21,14 @@ class EmptyStory(Exception):
     """
 
 
-async def get_script(
-    db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID
-) -> tuple[Meld, list[Scene]] | None:
-    """One Meld and every scene in it, with shots eager-loaded, or None if
-    the Meld is not this user's.
+async def get_script(db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID) -> list[Scene] | None:
+    """Every scene in one Meld, with shots eager-loaded, or None if the
+    Meld is not this user's.
 
-    Returns the Meld as well as the scenes so the router resolves it once
-    rather than calling get_meld a second time for the story hash. Goes
-    through get_meld first: that is the only place a Meld is resolved by
-    id, and it is what makes an unauthorised read a 404.
+    Goes through get_meld first: that is the only place a Meld is resolved
+    by id, and it is what makes an unauthorised read a 404.
     """
-    meld = await get_meld(db, user_id, meld_id)
-    if meld is None:
+    if await get_meld(db, user_id, meld_id) is None:
         return None
 
     result = await db.execute(
@@ -43,7 +37,7 @@ async def get_script(
         .where(Scene.meld_id == meld_id)
         .order_by(Scene.order_index)
     )
-    return meld, list(result.scalars().all())
+    return list(result.scalars().all())
 
 
 def count_stale(scenes: list[Scene]) -> tuple[int, int]:
@@ -140,9 +134,12 @@ async def update_shot(
     now = datetime.now(UTC)
     for name, value in fields.items():
         if name == "duration_sec" and value is not None:
-            # Quantised to the column's scale so the stored value and the
-            # hashed value agree; see _duration_at_column_scale.
-            value = Decimal(value).quantize(Decimal("0.01"))
+            # Quantised to the column's scale, and with the same rounding
+            # mode Postgres numeric uses, so the stored value and the
+            # hashed value agree; see _duration_at_column_scale. The
+            # context default (ROUND_HALF_EVEN) would round 4.005 to 4.00
+            # where Postgres stores 4.01.
+            value = Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         setattr(shot, name, value)
     shot.content_hash = content_hash_for_shot(shot)
     shot.updated_at = now
