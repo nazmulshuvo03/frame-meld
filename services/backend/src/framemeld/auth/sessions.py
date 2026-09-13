@@ -47,7 +47,14 @@ async def resolve_session(db: DbSession, raw_token: str) -> User | None:
 
 
 async def revoke_session(db: DbSession, raw_token: str) -> None:
-    result = await db.execute(select(Session).where(Session.token_hash == _hash_token(raw_token)))
+    # revoked_at.is_(None): without it, revoking an already-revoked token
+    # rewrites its timestamp -- replaying a leaked-and-revoked token would
+    # keep resetting its own audit trail.
+    result = await db.execute(
+        select(Session).where(
+            Session.token_hash == _hash_token(raw_token), Session.revoked_at.is_(None)
+        )
+    )
     session = result.scalar_one_or_none()
     if session is not None:
         session.revoked_at = datetime.now(UTC)

@@ -1,14 +1,32 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class MeldCreate(BaseModel):
+class _StrippedTitle:
+    """Shared by MeldCreate and MeldRename. min_length=1 only rejects an
+    empty string -- "   " passes it as written, since it is not empty until
+    stripped. Stripped rather than merely rejected, so "  My Film  " does
+    not force the caller to trim it themselves; rejected only when nothing
+    is left after stripping."""
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _strip_and_reject_blank(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("title must not be blank")
+            return stripped
+        return value
+
+
+class MeldCreate(_StrippedTitle, BaseModel):
     title: str = Field(default="Untitled Meld", min_length=1, max_length=200)
 
 
-class MeldRename(BaseModel):
+class MeldRename(_StrippedTitle, BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 

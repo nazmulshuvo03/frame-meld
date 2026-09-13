@@ -21,6 +21,16 @@ async def test_create_meld_requires_authentication(client):
     assert response.status_code == 401
 
 
+async def test_a_whitespace_only_title_is_rejected(logged_in):
+    response = await logged_in.post("/melds", json={"title": "   "})
+    assert response.status_code == 422
+
+
+async def test_a_title_is_stored_stripped(logged_in):
+    response = await logged_in.post("/melds", json={"title": "  My Film  "})
+    assert response.json()["title"] == "My Film"
+
+
 async def test_list_melds_returns_newest_first(logged_in):
     await logged_in.post("/melds", json={"title": "First"})
     await logged_in.post("/melds", json={"title": "Second"})

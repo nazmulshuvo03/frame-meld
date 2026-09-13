@@ -86,3 +86,16 @@ async def test_two_sessions_for_one_user_are_independent(db):
 
     assert await resolve_session(db, first) is None
     assert await resolve_session(db, second) is not None
+
+
+async def test_revoking_twice_keeps_the_first_timestamp(db):
+    """Otherwise a leaked-and-revoked token's audit trail is rewritten by
+    anyone who replays it."""
+    user = await _make_user(db)
+    token = await issue_session(db, user.id)
+
+    await revoke_session(db, token)
+    first = (await db.execute(select(Session))).scalar_one().revoked_at
+    await revoke_session(db, token)
+    db.expire_all()
+    assert (await db.execute(select(Session))).scalar_one().revoked_at == first
