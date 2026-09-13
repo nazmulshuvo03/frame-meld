@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy import func, select
 
+from framemeld.jobs import service
 from framemeld.jobs.queue import RecordingQueue
 from framemeld.jobs.service import ensure_job, mark_failed, mark_running, mark_succeeded
 from framemeld.melds import service as melds_service
@@ -79,6 +80,60 @@ async def test_a_failed_job_can_be_retried_in_place(db):
     assert retry.job.error is None
     assert retry.job.finished_at is None
     assert retry.job.attempts == 1  # the failed attempt is still counted
+
+
+async def test_a_running_job_is_not_re_enqueued(db):
+    """The case the whole task exists to prevent: a second click while the
+    worker is mid-flight must not reset the job and pay a provider twice.
+
+    Without JobState.RUNNING in _LIVE every other test in this file still
+    passes, so this is the only thing standing between that tuple and a
+    double spend.
+    """
+    meld = await _meld(db)
+    first = await _dispatch(db, meld)
+    assert await mark_running(db, first.job.id) is not None
+
+    again = await _dispatch(db, meld)
+
+    assert again.enqueued is False
+    assert again.job.id == first.job.id
+    assert again.job.state is JobState.RUNNING
+    # Not reset: attempts is the row's history and the retry budget reads it.
+    assert again.job.attempts == 1
+
+
+async def test_the_loser_of_an_insert_race_reads_the_winners_row(db, monkeypatch):
+    """Two clicks milliseconds apart both see no existing row, so both try to
+    insert and the unique index decides. The loser must read what the winner
+    wrote rather than propagating IntegrityError — and the savepoint must
+    leave the caller's transaction usable afterwards.
+
+    The race is simulated by hiding the row from the first lookup only.
+    Driving two real sessions is not possible here: the test fixture binds
+    one connection so the whole test can roll back.
+    """
+    meld = await _meld(db)
+    winner = await _dispatch(db, meld)
+
+    real_by_key = service._by_key
+    lookups = 0
+
+    async def racing_by_key(session, key):
+        nonlocal lookups
+        lookups += 1
+        # First call: the winner's insert is not visible to us yet.
+        return None if lookups == 1 else await real_by_key(session, key)
+
+    monkeypatch.setattr(service, "_by_key", racing_by_key)
+
+    loser = await _dispatch(db, meld)
+
+    assert loser.enqueued is False
+    assert loser.job.id == winner.job.id
+    # The savepoint contained the failed insert: the surrounding transaction
+    # is still usable, and no second row was written.
+    assert (await db.execute(select(func.count()).select_from(Job))).scalar_one() == 1
 
 
 async def test_mark_running_refuses_a_job_that_is_not_queued(db):

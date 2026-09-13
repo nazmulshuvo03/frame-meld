@@ -91,7 +91,11 @@ async def ensure_job(
             await db.flush()
     except IntegrityError:
         winner = await _by_key(db, key)
-        if winner is None:  # pragma: no cover — the index says this cannot happen
+        if winner is None:
+            # Not the unique index, then — a foreign key or a check
+            # constraint. Nothing here knows how to recover from those, and
+            # swallowing one would turn a caller's bad meld_id into a
+            # mysteriously missing job.
             raise
         return JobDispatch(winner, enqueued=False)
 
