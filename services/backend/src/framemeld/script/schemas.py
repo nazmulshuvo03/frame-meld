@@ -2,9 +2,10 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from framemeld.models.script import MAX_SHOT_SECONDS, CameraAngle, DialogueKind
+from framemeld.schemas_shared import _RejectsExplicitNull
 from framemeld.script.generation import MIN_SHOT_SECONDS
 
 
@@ -62,30 +63,6 @@ class ScriptOut(BaseModel):
     scenes: list[SceneDetail]
     stale_scenes: int
     stale_shots: int
-
-
-class _RejectsExplicitNull:
-    """Shared by ScenePatch and ShotPatch. Every field on both is optional in
-    the sense of "may be omitted", not "may be cleared to nothing": each
-    backs a NOT NULL column with a "" default, so send "" to empty a text
-    field. `model_dump(exclude_unset=True)` excludes fields the client
-    *omitted*, not fields it explicitly set to null — so an unguarded
-    `{"heading": null}` reaches `setattr(row, name, None)` against a NOT
-    NULL column and raises IntegrityError at flush, a 500 instead of a 422.
-
-    A `mode="before"` validator does not run for a field the client
-    omitted, only for one it actually sent — checked against the installed
-    pydantic (2.13.5): an omitted field keeps its default untouched and
-    unvalidated, so this rejects null without disturbing the
-    omitted-means-unchanged path that `exclude_unset` relies on.
-    """
-
-    @field_validator("*", mode="before")
-    @classmethod
-    def _null_is_not_a_value(cls, value: object) -> object:
-        if value is None:
-            raise ValueError('null is not a valid value — omit the field, or send ""')
-        return value
 
 
 class ScenePatch(_RejectsExplicitNull, BaseModel):

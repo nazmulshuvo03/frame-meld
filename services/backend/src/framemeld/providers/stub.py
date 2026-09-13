@@ -16,6 +16,32 @@ _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 MAX_SHOTS_PER_SCENE = 5
 
+#: Below models.cast.MAX_CHARACTERS, so the stub never exercises the
+#: parser's truncation path by accident and a test that wants it has to
+#: ask for it explicitly.
+MAX_STUB_CHARACTERS = 6
+
+#: Words that are capitalised in prose without being names. Cosmetic only --
+#: a stub that cast "She" as a lead would still be deterministic and
+#: story-derived, just confusing to look at during manual testing.
+_NOT_NAMES = frozenset(
+    """a an the and but or so then now here there this that these those
+    he she it they we you i his her its their our your him them us me my
+    when while after before outside inside above below once again still
+    if as at in on of to for from with without by up down over under
+    one two three no yes not never always""".split()
+)
+
+_HAIR = ("dark", "silver", "red", "fair", "greying", "black")
+_CLOTHES = (
+    "wool coat",
+    "plain shirt",
+    "long raincoat",
+    "knitted cardigan",
+    "denim jacket",
+    "grey suit",
+)
+
 
 class StubLLMProvider:
     """A local, deterministic LLM that costs nothing and never leaves the
@@ -45,6 +71,74 @@ class StubLLMProvider:
             # error path something to exercise.
             raise ProviderRefusedError("There is no story to work from yet.")
 
+        # Which artifact was asked for. Branching on the schema's name
+        # rather than on the system prompt because the name is the stable
+        # contract -- the prompt is prose and gets reworded.
+        if json_schema.get("name") == "characters":
+            payload: dict[str, Any] = {"characters": self._characters(user)}
+        else:
+            payload = {"scenes": self._scenes(user)}
+
+        return ProviderResult(
+            text=json.dumps(payload),
+            bytes_=None,
+            cost_usd=Decimal("0"),
+            provider=self.name,
+            model=self.model,
+            raw={"stub": True},
+        )
+
+    def _characters(self, user: str) -> list[dict[str, str]]:
+        """A cast derived from the story's own proper nouns.
+
+        Derived rather than fixed for the same reason the scene list is: a
+        stub that returned the same two names for every story would let a
+        broken prompt-building path pass every test here. Falls back to one
+        unnamed figure when a story contains no capitalised names at all,
+        because an empty cast is a terminal parse error and "this story has
+        no proper nouns" is not a generation failure.
+        """
+        names = self._proper_nouns(user)[:MAX_STUB_CHARACTERS] or ["The Narrator"]
+        return [
+            {
+                "name": name,
+                "role": "lead" if index == 0 else "supporting",
+                "description": f"Appears in the story. Mentioned as {name}.",
+                # Deterministic but not identical between characters: two
+                # characters sharing an appearance would make two sheets
+                # byte-identical and hide a broken per-character path.
+                "appearance": (
+                    f"A person of average build with {_HAIR[index % len(_HAIR)]} hair, "
+                    f"wearing a {_CLOTHES[index % len(_CLOTHES)]}."
+                ),
+            }
+            for index, name in enumerate(names)
+        ]
+
+    @staticmethod
+    def _proper_nouns(text: str) -> list[str]:
+        """Capitalised words, minus the ones that are only capitalised
+        because they began a sentence.
+
+        Crude on purpose -- it has to be deterministic and story-dependent,
+        not correct English. Skipping every sentence-initial word instead
+        would look more principled and work much worse: in ordinary prose
+        most character names introduce their own sentence, so that rule
+        discarded nearly every real name and left only the fallback cast.
+        """
+        seen: list[str] = []
+        for word in text.split():
+            candidate = word.strip(".,;:!?\"'()-").strip()
+            if (
+                candidate[:1].isupper()
+                and candidate.isalpha()
+                and candidate.lower() not in _NOT_NAMES
+                and candidate not in seen
+            ):
+                seen.append(candidate)
+        return seen
+
+    def _scenes(self, user: str) -> list[dict[str, Any]]:
         scenes = []
         shot_number = 0
         for index, paragraph in enumerate(self._paragraphs(user)):
@@ -74,16 +168,7 @@ class StubLLMProvider:
                         "shots": shots,
                     }
                 )
-
-        payload = {"scenes": scenes}
-        return ProviderResult(
-            text=json.dumps(payload),
-            bytes_=None,
-            cost_usd=Decimal("0"),
-            provider=self.name,
-            model=self.model,
-            raw={"stub": True},
-        )
+        return scenes
 
     @staticmethod
     def _paragraphs(text: str) -> list[str]:

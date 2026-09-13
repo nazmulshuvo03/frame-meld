@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from framemeld.assets.router import router as assets_router
 from framemeld.auth.router import router as auth_router
+from framemeld.cast.router import router as cast_router
 from framemeld.config import settings
 from framemeld.credits.router import router as credits_router
 from framemeld.melds.router import router as melds_router
@@ -33,6 +34,8 @@ app.include_router(melds_router)
 # anyway, so /melds/{meld_id} keeps resolving to the melds detail route
 # first if that ever stops being true.
 app.include_router(script_router)
+# Same prefix again (/melds/{meld_id}); see the note above.
+app.include_router(cast_router)
 
 
 @app.get("/health")
