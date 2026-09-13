@@ -216,3 +216,70 @@ export const updateShot = (meldId: string, shotId: string, patch: ShotPatch) =>
     method: "PATCH",
     body: JSON.stringify(patch),
   });
+
+// --- Cast, credits and assets (M3) ---------------------------------------
+
+export const CHARACTER_ROLES = ["lead", "supporting", "background"] as const;
+export type CharacterRole = (typeof CHARACTER_ROLES)[number];
+
+export type CharacterImage = {
+  id: string;
+  kind: string;
+  is_canonical: boolean;
+  state: string;
+  /** Null until a generation succeeds. */
+  asset_id: string | null;
+  credits_spent: number;
+  updated_at: string;
+};
+
+export type Character = {
+  id: string;
+  order_index: number;
+  name: string;
+  role: CharacterRole;
+  description: string;
+  appearance: string;
+  state: string;
+  content_hash: string;
+  updated_at: string;
+  sheet: CharacterImage | null;
+};
+
+export type CastView = {
+  characters: Character[];
+  stale_characters: number;
+  stale_sheets: number;
+};
+
+export type Pricing = { version: number; quotes: Record<string, number> };
+
+/** The asset route is derivable from an id, so there is no URL field on
+ *  the API's response -- a stored URL would be a second thing to keep
+ *  true. Rendered straight into an <img src>, which relies on the session
+ *  cookie being sent with a subresource request: fine while web and api
+ *  are same-site, and the reason M5's signed URLs exist. */
+export const assetUrl = (assetId: string) => `${BASE}/assets/${assetId}`;
+
+export const getCast = (meldId: string) => request<CastView>(`/melds/${meldId}/cast`);
+
+export const generateCast = (meldId: string) =>
+  request<Job>(`/melds/${meldId}/cast/generate`, { method: "POST" });
+
+export const generateSheet = (meldId: string, characterId: string) =>
+  request<Job>(`/melds/${meldId}/characters/${characterId}/sheet`, { method: "POST" });
+
+// Narrowed to exactly what the API's CharacterPatch declares, so passing
+// `state` or `content_hash` is a compile error rather than a 422.
+export type CharacterPatch = Partial<
+  Pick<Character, "name" | "role" | "description" | "appearance">
+>;
+
+export const updateCharacter = (meldId: string, characterId: string, patch: CharacterPatch) =>
+  request<Character>(`/melds/${meldId}/characters/${characterId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+
+export const getBalance = () => request<{ balance: number }>("/credits");
+export const getPricing = () => request<Pricing>("/credits/pricing");

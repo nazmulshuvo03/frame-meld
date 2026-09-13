@@ -90,9 +90,17 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6">
-        <Link href={`/meld/${id}`} className="text-sm text-neutral-500 hover:underline">
-          ← Story
-        </Link>
+        <div className="flex items-baseline justify-between">
+          <Link href={`/meld/${id}`} className="text-sm text-neutral-500 hover:underline">
+            ← Story
+          </Link>
+          <Link
+            href={`/meld/${id}/cast`}
+            className="text-sm text-neutral-500 hover:underline"
+          >
+            Next up: Cast →
+          </Link>
+        </div>
         <div className="mt-1 flex items-baseline justify-between">
           <h1 className="text-2xl font-semibold">Script</h1>
           <button
