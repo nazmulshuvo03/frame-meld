@@ -27,6 +27,14 @@ def _stub_llm_by_default(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "stub")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_storage(tmp_path, monkeypatch):
+    """Every test writes into its own directory, so a suite run never
+    leaves files in the repo and two tests can never see each other's
+    assets."""
+    monkeypatch.setattr(settings, "storage_local_root", str(tmp_path / "assets"))
+
+
 @pytest.fixture(scope="session")
 async def test_engine():
     assert settings.test_database_url != settings.database_url, (

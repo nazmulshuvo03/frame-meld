@@ -19,3 +19,6 @@ references/
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated images and other runtime artifacts (STORAGE_LOCAL_ROOT)
+var/

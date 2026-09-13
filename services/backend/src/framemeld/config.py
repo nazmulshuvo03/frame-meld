@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     # because "runs out mid-flow" is a path that has to work.
     signup_grant_credits: int = 500
 
+    # "local" writes under storage_local_root; S3/R2 arrives in M5, when the
+    # Remotion render service needs URLs it can fetch without a session
+    # cookie (M3-D1).
+    storage_backend: str = "local"
+    storage_local_root: str = "./var/assets"
+
     # NoDecode switches off pydantic-settings' default JSON parsing for
     # complex types. Without it, CORS_ORIGINS would have to be written as a
     # JSON array in .env, and the validator below could never run — source
