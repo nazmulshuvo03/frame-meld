@@ -1,0 +1,77 @@
+import uuid
+
+from sqlalchemy import select
+
+from framemeld.assets.service import store_asset
+from framemeld.models.user import User
+from framemeld.providers.images.stub import solid_png
+
+
+async def _asset_for_logged_in_user(db, data: bytes):
+    user = (await db.execute(select(User))).scalars().first()
+    return await store_asset(db, user_id=user.id, data=data, mime="image/png", ext="png")
+
+
+async def test_an_owner_gets_the_bytes(logged_in, db):
+    data = solid_png(8, 8, (10, 20, 30))
+    asset = await _asset_for_logged_in_user(db, data)
+    await db.commit()
+
+    response = await logged_in.get(f"/assets/{asset.id}")
+    assert response.status_code == 200
+    assert response.content == data
+    assert response.headers["content-type"] == "image/png"
+
+
+async def test_an_asset_is_cacheable_but_private(logged_in, db):
+    """Content never changes for a given id, so it is immutable -- but it
+    is one user's artwork, so no shared cache may keep it."""
+    asset = await _asset_for_logged_in_user(db, solid_png(4, 4, (0, 0, 0)))
+    await db.commit()
+
+    cache_control = (await logged_in.get(f"/assets/{asset.id}")).headers["cache-control"]
+    assert "private" in cache_control
+    assert "immutable" in cache_control
+
+
+async def test_an_unknown_asset_is_404(logged_in):
+    assert (await logged_in.get(f"/assets/{uuid.uuid4()}")).status_code == 404
+
+
+async def test_another_users_asset_is_404_not_403(client, db):
+    """403 would confirm the asset exists. Same rule as every other
+    user-owned row in this codebase."""
+    await client.post(
+        "/auth/signup", json={"email": "owner-asset@example.com", "password": "hunter2hunter2"}
+    )
+    owner = (
+        await db.execute(select(User).where(User.email == "owner-asset@example.com"))
+    ).scalar_one()
+    asset = await store_asset(
+        db, user_id=owner.id, data=solid_png(4, 4, (5, 5, 5)), mime="image/png", ext="png"
+    )
+    await db.commit()
+
+    stranger = {"email": "stranger-asset@example.com", "password": "hunter2hunter2"}
+    assert (await client.post("/auth/signup", json=stranger)).status_code == 201
+    # Signup does not issue a session cookie; without this the request is
+    # anonymous and 401s before authorisation is ever reached.
+    assert (await client.post("/auth/login", json=stranger)).status_code == 200
+
+    assert (await client.get(f"/assets/{asset.id}")).status_code == 404
+
+
+async def test_serving_requires_authentication(client, db):
+    await client.post(
+        "/auth/signup", json={"email": "anon-asset@example.com", "password": "hunter2hunter2"}
+    )
+    user = (
+        await db.execute(select(User).where(User.email == "anon-asset@example.com"))
+    ).scalar_one()
+    asset = await store_asset(
+        db, user_id=user.id, data=solid_png(4, 4, (5, 5, 5)), mime="image/png", ext="png"
+    )
+    await db.commit()
+    await client.post("/auth/logout")
+
+    assert (await client.get(f"/assets/{asset.id}")).status_code == 401

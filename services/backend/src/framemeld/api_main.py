@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from framemeld.assets.router import router as assets_router
 from framemeld.auth.router import router as auth_router
 from framemeld.config import settings
 from framemeld.credits.router import router as credits_router
@@ -25,6 +26,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(credits_router)
+app.include_router(assets_router)
 app.include_router(melds_router)
 # Same prefix as melds_router (/melds/{meld_id}), but path parameters do not
 # match across "/" so the two never collide. Mounted after melds_router
