@@ -12,6 +12,7 @@ from framemeld.auth.deps import CurrentUser
 from framemeld.auth.passwords import hash_password, verify_password
 from framemeld.auth.sessions import issue_session, revoke_session
 from framemeld.config import settings
+from framemeld.credits.service import grant
 from framemeld.db import get_session
 from framemeld.models.user import User
 from framemeld.ratelimit import clear, record_failure, retry_after
@@ -71,6 +72,11 @@ async def signup(credentials: Credentials, db: Db) -> User:
     user = User(email=credentials.email, password_hash=hash_password(credentials.password))
     db.add(user)
     try:
+        # Flushed, not committed: the grant below has to be in the same
+        # transaction, or a crash between them creates an account that can
+        # never generate anything and has no record of why.
+        await db.flush()
+        await grant(db, user.id, settings.signup_grant_credits, "welcome")
         await db.commit()
     except IntegrityError:
         # Two concurrent signups for the same address both passed the check

@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     # anonymous callers. Fine locally, not on a public host.
     docs_enabled: bool = True
 
+    # Credits are granted, not bought, until Stripe arrives post-M6 (spec
+    # section 10). 500 credits is $5 retail: roughly 40 character sheets,
+    # enough to work through the Cast stage without topping up, and small
+    # enough that running out is reachable in testing -- which matters,
+    # because "runs out mid-flow" is a path that has to work.
+    signup_grant_credits: int = 500
+
     # NoDecode switches off pydantic-settings' default JSON parsing for
     # complex types. Without it, CORS_ORIGINS would have to be written as a
     # JSON array in .env, and the validator below could never run — source
