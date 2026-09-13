@@ -100,7 +100,9 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
         <span>
           {wordCount} {wordCount === 1 ? "word" : "words"}
         </span>
-        <span className="text-neutral-400">Next up: Script (arrives in M2)</span>
+        <Link href={`/meld/${id}/script`} className="text-neutral-500 hover:underline">
+          Next up: Script →
+        </Link>
       </footer>
     </main>
   );
