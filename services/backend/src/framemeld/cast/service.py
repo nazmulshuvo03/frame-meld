@@ -17,6 +17,7 @@ from framemeld.melds.service import get_meld
 from framemeld.models.cast import Character, CharacterImage, CharacterImageKind
 from framemeld.models.job import Job, JobKind
 from framemeld.models.script import ArtifactState
+from framemeld.moderation.service import Blocked, check_and_record
 
 
 class EmptyStory(Exception):
@@ -83,6 +84,13 @@ async def request_extraction(
     if not meld.story.text.strip():
         raise EmptyStory
 
+    # Before ensure_job and before the hold (spec 4.5). A blocked story that
+    # reached the queue would mean a held credit and a paid provider call
+    # for something we were never going to keep.
+    verdict = await check_and_record(db, meld, meld.story.text)
+    if not verdict.allowed:
+        raise Blocked(verdict.reason or "This story can't be used to generate images.")
+
     dispatch = await ensure_job(
         db,
         meld_id=meld_id,
@@ -127,6 +135,12 @@ async def request_sheet(
         # Refused here rather than in the job, so it costs a 422 instead of
         # a paid image of nothing.
         raise EmptyAppearance
+
+    # Again before the hold. This one gates the expensive call: an image
+    # provider bills us for a refusal the same as for a picture.
+    verdict = await check_and_record(db, meld, character.appearance)
+    if not verdict.allowed:
+        raise Blocked(verdict.reason or "This description can't be used to generate an image.")
 
     input_hash = character_image_input_hash(character.content_hash, CharacterImageKind.SHEET)
 

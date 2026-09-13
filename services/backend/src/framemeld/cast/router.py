@@ -11,6 +11,7 @@ from framemeld.credits.service import InsufficientCredits
 from framemeld.db import get_session
 from framemeld.jobs.queue import Queue, get_queue
 from framemeld.jobs.schemas import JobOut
+from framemeld.moderation.service import Blocked
 
 router = APIRouter(prefix="/melds/{meld_id}", tags=["cast"])
 
@@ -84,6 +85,16 @@ async def generate_cast(meld_id: uuid.UUID, user: CurrentUser, db: Db, jobs: Job
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Write some story first — there is nobody to cast yet.",
         ) from None
+    except Blocked as exc:
+        # Committed, not rolled back. Spec 4.5 wants flagged content
+        # recorded so it can be reviewed, and the only thing pending on
+        # this path is the verdict itself -- the refusal happens before any
+        # job row or hold exists. Without this the FLAGGED state dies with
+        # the request and every retry re-classifies from scratch.
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason
+        ) from None
     except InsufficientCredits as exc:
         raise await _cannot_pay(db, exc) from None
     if dispatch is None:
@@ -112,6 +123,16 @@ async def generate_sheet(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Describe what this character looks like first.",
+        ) from None
+    except Blocked as exc:
+        # Committed, not rolled back. Spec 4.5 wants flagged content
+        # recorded so it can be reviewed, and the only thing pending on
+        # this path is the verdict itself -- the refusal happens before any
+        # job row or hold exists. Without this the FLAGGED state dies with
+        # the request and every retry re-classifies from scratch.
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason
         ) from None
     except InsufficientCredits as exc:
         raise await _cannot_pay(db, exc) from None

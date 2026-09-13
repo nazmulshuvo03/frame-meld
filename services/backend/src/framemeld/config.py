@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     # "local" writes under storage_local_root; S3/R2 arrives in M5, when the
     # Remotion render service needs URLs it can fetch without a session
     # cookie (M3-D1).
+    # Off makes every check pass and is for local development only: the
+    # stub LLM cannot classify anything, so leaving this on with
+    # LLM_PROVIDER=stub would mean the stub's fixed verdict decided what a
+    # user may write. Any deployment that reaches real users must have this
+    # on with a real provider configured.
+    moderation_enabled: bool = False
+
     storage_backend: str = "local"
     storage_local_root: str = "./var/assets"
 

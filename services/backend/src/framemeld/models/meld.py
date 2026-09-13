@@ -53,6 +53,10 @@ class Meld(Base):
         enum_column(ModerationState, "meld_moderation_state"),
         default=ModerationState.PENDING,
     )
+    #: The content hash the moderation_state above applies to. Without it a
+    #: `passed` verdict would outlive the text it was about, and a user
+    #: could get a benign story approved and then rewrite it.
+    moderation_hash: Mapped[str] = mapped_column(String(64), default="")
 
     aspect_ratio: Mapped[str] = mapped_column(String(10), default="16:9")
     style_preset: Mapped[str | None] = mapped_column(String(50), nullable=True)
