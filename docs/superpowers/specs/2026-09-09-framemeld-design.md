@@ -239,6 +239,22 @@ Every billable action follows three steps:
    the held estimate and the adapter's real reported cost. A failed job writes a full
    `refund`.
 
+> **Correction (M3, implemented).** Step 3 above is wrong as written, and M3 implements
+> the rule below instead (M3-D3, M3-D5). Read literally, "the difference between the held
+> estimate and the adapter's real reported cost" means charging users provider cost price,
+> which deletes the margin §7 depends on. The implemented rule is:
+>
+> - The quote is a **fixed retail price per action** and a **ceiling**, not an estimate.
+> - Settlement compares *work actually done* against *work quoted*, both in credits —
+>   never dollars against dollars. Where less work was done than quoted, the difference is
+>   refunded; where more was done, the overage is **absorbed and logged at WARNING**, so a
+>   balance can never go further negative than the number the user agreed to.
+> - The adapter's real `cost_usd` is still recorded, on `jobs.cost_usd` (M3-D6). It is
+>   margin data, not the billing input.
+>
+> A failed job still refunds in full, including a provider content refusal, which is
+> terminal rather than retried.
+
 **The balance is never a mutable integer.** It is `SUM(delta)` over an append-only
 `credit_ledger`. Boring, auditable, and impossible to corrupt by a lost update.
 
@@ -523,9 +539,26 @@ Character extraction with canonical descriptions; character sheet image generati
 failed generation refunds in full.
 **AI spend:** ~$0.02/Meld
 
+> **Correction (M3, implemented).** Two scope lines moved when M3 was built:
+>
+> - **`assets` and object storage landed here, not in M4** (M3-D1). M3 generates character
+>   sheets, and they have to be stored somewhere; there is no coherent M3 without it.
+>   Storage sits behind a `Storage` protocol with a local-disk implementation. The S3/R2
+>   implementation is deferred until something *outside* the api needs to read a file,
+>   which is M5's render service.
+> - **`shot_characters` did not land here** (M3-D2). Nothing in M3 reads it, and populating
+>   it needs an LLM pass mapping characters onto the shot list — work M4's shot-image
+>   generation must do anyway. M4 creates and populates it together.
+>
+> M3 also brought forward the **moderation gate** (§4.5), which M2 deferred to "the
+> milestone where the credit gate exists": a blocked prompt must fail before a hold is
+> taken, so it belongs wherever the hold is.
+
 ### M4 — Shots
 Shot still generation using character sheets as references. Speech generation per shot.
 Per-shot regenerate. Staleness propagates from characters through to shot stills.
+Creates and populates **`shot_characters`**, which M3 deliberately did not (M3-D2).
+The `assets` table it was to introduce already exists, from M3 (M3-D1).
 **Done when:** every shot has a still whose characters visibly match their sheets, plus
 an audio clip; editing a character marks exactly the right stills stale.
 **AI spend:** ~$0.60/Meld
