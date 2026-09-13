@@ -17,7 +17,12 @@ from framemeld.providers.base import (
     ProviderTransportError,
 )
 from framemeld.script.generation import MIN_SHOT_SECONDS, parse_script
-from framemeld.script.hashes import content_hash_for_story, script_input_hash
+from framemeld.script.hashes import (
+    content_hash_for_scene,
+    content_hash_for_shot,
+    content_hash_for_story,
+    script_input_hash,
+)
 from framemeld.worker import run_generate_script
 
 STORY = (
@@ -126,6 +131,11 @@ async def test_a_generated_script_is_persisted_and_fresh(db):
     assert len(shots) >= 2
     assert all(row.state is ArtifactState.FRESH for row in (*scenes, *shots))
     assert all(row.input_hash == job_input_hash for row in (*scenes, *shots))
+    # Not just non-empty: the stored hash must be the one the hash functions
+    # produce for these rows, or M4's shot images will never notice an edit
+    # (their input_hash is derived from this value).
+    assert all(scene.content_hash == content_hash_for_scene(scene) for scene in scenes)
+    assert all(shot.content_hash == content_hash_for_shot(shot) for shot in shots)
 
 
 async def test_generating_advances_the_meld_to_the_script_stage(db):
@@ -186,10 +196,26 @@ async def test_a_provider_refusal_fails_the_job_with_a_readable_reason(db):
 async def test_a_job_that_is_not_queued_is_skipped(db):
     _user, meld = await _meld_with_story(db)
     job = await _queue_script_job(db, meld)
-    await run_generate_script(db, job.id)
+    job_id = job.id
+
+    first = await run_generate_script(db, job_id)
+    assert first.state is JobState.SUCCEEDED
+    attempts_after_first = (
+        await db.execute(select(Job.attempts).where(Job.id == job_id))
+    ).scalar_one()
 
     # A redelivered message: the job already succeeded.
-    assert (await run_generate_script(db, job.id)).state is JobState.SUCCEEDED
+    again = await run_generate_script(db, job_id)
+
+    assert again.state is JobState.SUCCEEDED
+    # The guard held: nothing re-claimed the job, so no second generation
+    # was attempted. Without it this passes anyway -- the stub is
+    # deterministic and apply_script replaces, so the end state is
+    # identical; attempts is what actually distinguishes "skipped" from
+    # "ran again and produced the same thing."
+    assert (
+        await db.execute(select(Job.attempts).where(Job.id == job_id))
+    ).scalar_one() == attempts_after_first
     db.expire_all()
     assert len((await db.execute(select(Scene))).scalars().all()) == 2
 
