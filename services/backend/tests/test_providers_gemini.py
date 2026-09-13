@@ -115,16 +115,26 @@ async def test_a_missing_schema_body_omits_responseschema(monkeypatch):
     assert "responseSchema" not in seen["body"]["generationConfig"]
 
 
-async def test_cost_is_zero_pending_a_real_token_price_table(monkeypatch):
-    """Gemini's usageMetadata reports tokens, never a dollar figure the way
-    OpenRouter's usage.cost does -- see the adapter's comment. M2 has no
-    credit ledger to feed regardless."""
+async def test_cost_is_computed_from_the_reported_token_counts(monkeypatch):
+    """M2 shipped this adapter reporting a hardcoded zero and recorded the
+    debt; M3 pays it (M3-D6). The number is margin data, not the billing
+    input -- credits are quoted at a fixed retail price (M3-D5)."""
     provider = _provider(
         lambda request: _ok(
-            "{}", usageMetadata={"promptTokenCount": 100, "candidatesTokenCount": 50}
+            "{}",
+            usageMetadata={"promptTokenCount": 1_000_000, "candidatesTokenCount": 1_000_000},
+            modelVersion="gemini-3.5-flash-lite",
         ),
         monkeypatch,
     )
+    result = await provider.complete(system="s", user="u", json_schema={})
+    assert result.cost_usd == Decimal("2.80")
+
+
+async def test_a_response_with_no_usage_block_costs_zero(monkeypatch):
+    """Absent counters must not raise: by the time the response is being
+    parsed, the model has already been paid for."""
+    provider = _provider(lambda request: _ok("{}"), monkeypatch)
     result = await provider.complete(system="s", user="u", json_schema={})
     assert result.cost_usd == Decimal("0")
 

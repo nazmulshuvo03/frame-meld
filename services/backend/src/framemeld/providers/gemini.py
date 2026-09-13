@@ -1,4 +1,3 @@
-from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -10,6 +9,7 @@ from framemeld.providers.base import (
     ProviderResult,
     ProviderTransportError,
 )
+from framemeld.providers.rates import usd_for_tokens
 
 _TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 
@@ -139,20 +139,24 @@ class GeminiLLMProvider:
         if not text:
             raise ProviderResponseError("The language model returned no reply.")
 
+        usage = body.get("usageMetadata") or {}
+        model_used = body.get("modelVersion") or self.model
+
         return ProviderResult(
             text=text,
             bytes_=None,
-            # Gemini's usageMetadata reports token counts, never a dollar
-            # figure the way OpenRouter's usage.cost does. Turning token
-            # counts into a price needs a versioned rate table this adapter
-            # does not have yet, and M2 has no credit ledger to feed
-            # regardless (Global Constraints: "No credits in M2"). Zero is
-            # the same safe-default posture the OpenRouter adapter uses for
-            # a cost it cannot trust. Wiring a real figure from
-            # usageMetadata is M3's job, before credit settlement can charge
-            # a Gemini-billed call for real.
-            cost_usd=Decimal("0"),
+            # Gemini reports token counts, never a dollar figure the way
+            # OpenRouter's usage.cost does, so the adapter converts. M2 shipped
+            # this as a hardcoded zero with the debt recorded; this is it paid.
+            # `or 0` because a field can be absent on a cached or zero-token
+            # response, and int() of None would be the only way this call ever
+            # failed *after* the model had already been paid for.
+            cost_usd=usd_for_tokens(
+                model_used,
+                int(usage.get("promptTokenCount") or 0),
+                int(usage.get("candidatesTokenCount") or 0),
+            ),
             provider=self.name,
-            model=body.get("modelVersion") or self.model,
+            model=model_used,
             raw=body,
         )

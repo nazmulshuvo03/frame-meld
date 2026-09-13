@@ -46,7 +46,11 @@ class Settings(BaseSettings):
     # against the account's Cloud credit -- so switching this on spends
     # real money (see the design spec's section 6.3).
     image_provider: str = "stub"
-    image_model: str = "imagen-4.0-fast-generate-001"
+    # Not Imagen: the whole Imagen 4 family was shut down on 2026-08-17,
+    # so the endpoint the plan originally named no longer answers. This is
+    # the cheapest current Gemini image model at 1K ($0.039/image), and it
+    # takes the same generateContent request shape as the LLM adapter.
+    image_model: str = "gemini-2.5-flash-image"
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     gemini_api_key: str = ""
