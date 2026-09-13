@@ -105,10 +105,17 @@ export function useAutosave<T>({
     }
 
     if (value === pendingRef.current) {
-      // The value matches what was last confirmed — the user undid their
-      // edit. Report it as saved rather than leaving a stale "unsaved",
-      // which would nag on close for work that is not actually pending.
-      setStatus((current) => (current === "idle" ? "idle" : "saved"));
+      // Already dispatched (or about to be — the debounce below would only
+      // re-issue the same value). Only "saved" if it is also *confirmed*:
+      // a saveTick-triggered re-run of this effect — fired when an older,
+      // already-superseded save settles — can land here while a newer
+      // dispatch for this same value is still in flight, and pendingRef
+      // moves at dispatch time, not at confirmation time. Comparing
+      // against pendingRef alone would report "saved" for a value the
+      // server has not actually confirmed yet.
+      if (value === savedRef.current) {
+        setStatus((current) => (current === "idle" ? "idle" : "saved"));
+      }
       return;
     }
 

@@ -80,6 +80,11 @@ async function request<T>(path: string, init: RequestInitWithTimeout = {}): Prom
   return (await response.json()) as T;
 }
 
+/** Exposed only so the timeout -- the one behaviour this module adds that
+ *  no public call can exercise on its own -- is testable. A visible,
+ *  named seam is better than leaving it unguarded. */
+export const __testing = { request };
+
 export const signup = (email: string, password: string) =>
   request<User>("/auth/signup", { method: "POST", body: JSON.stringify({ email, password }) });
 
