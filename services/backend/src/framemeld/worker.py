@@ -23,20 +23,39 @@ from framemeld.config import settings
 from framemeld.credits.service import refund, settle
 from framemeld.db import SessionLocal
 from framemeld.jobs.service import mark_failed, mark_for_retry, mark_running, mark_succeeded
+from framemeld.models.asset import Asset
 from framemeld.models.cast import Character, CharacterImage
 from framemeld.models.job import Job, JobState
 from framemeld.models.meld import Meld, Story
-from framemeld.models.script import ArtifactState
+from framemeld.models.script import ArtifactState, Shot
+from framemeld.models.shots import AudioClip, ShotImage
 from framemeld.providers.base import ProviderError, ProviderResponseError
 from framemeld.providers.images.registry import get_image_provider
 from framemeld.providers.registry import get_llm_provider
+from framemeld.providers.speech.registry import get_speech_provider
+from framemeld.providers.speech.wav import WAV_MIME
 from framemeld.script.generation import (
     SCRIPT_JSON_SCHEMA,
     apply_script,
     build_messages,
     parse_script,
 )
+from framemeld.shots.generation import (
+    SHOT_CHARACTERS_JSON_SCHEMA,
+    apply_shot_characters,
+    build_casting_messages,
+    parse_shot_characters,
+    shots_in_film_order,
+    still_prompt,
+)
+from framemeld.shots.hashes import (
+    SPEECH_PARAMS,
+    STILL_PARAMS,
+    content_hash_for_audio_clip,
+    content_hash_for_shot_image,
+)
 from framemeld.staleness import recompute_staleness
+from framemeld.storage.registry import get_storage
 
 logger = logging.getLogger(__name__)
 
@@ -354,6 +373,315 @@ async def generate_character_image(ctx: dict[str, Any], job_id: str) -> str:
     return outcome.state.value
 
 
+async def run_map_shot_characters(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
+    """Work out which characters are in which shot (M4-D1).
+
+    The pass M3-D2 deferred. Same shape as the other two LLM jobs; the only
+    difference is that it reads two artifacts rather than one, which is why
+    its input_hash has two parents.
+    """
+    job = await mark_running(db, job_id)
+    if job is None:
+        existing = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
+        state = JobState.CANCELLED if existing is None else existing.state
+        return JobOutcome(state, retryable=False)
+
+    meld = (await db.execute(select(Meld).where(Meld.id == job.meld_id))).scalar_one_or_none()
+    characters = (
+        []
+        if meld is None
+        else list(
+            (
+                await db.execute(
+                    select(Character)
+                    .where(Character.meld_id == job.meld_id)
+                    .order_by(Character.order_index)
+                )
+            ).scalars()
+        )
+    )
+    shots = [] if meld is None else await shots_in_film_order(db, job.meld_id)
+    if meld is None or not characters or not shots:
+        # The cast or the script was regenerated out from under this job.
+        # Terminal rather than retried: re-running would map a cast that is
+        # no longer there.
+        await mark_failed(db, job, "The cast or the script changed. Try again.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    provider = get_llm_provider()
+    system, user = build_casting_messages(characters, shots)
+
+    try:
+        result = await provider.complete(
+            system=system, user=user, json_schema=SHOT_CHARACTERS_JSON_SCHEMA
+        )
+        draft = parse_shot_characters(result.text or "")
+    except ProviderError as exc:
+        logger.warning("map_shot_characters failed for job %s: %s", job.id, exc)
+        if exc.retryable and job.attempts < MAX_ATTEMPTS:
+            await mark_for_retry(db, job, str(exc))
+            return JobOutcome(JobState.QUEUED, retryable=True)
+        await mark_failed(db, job, str(exc))
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+    except Exception:
+        logger.exception("map_shot_characters crashed for job %s", job.id)
+        await mark_failed(db, job, "Working out who is in each shot failed. Try again.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    await apply_shot_characters(db, meld, characters, shots, draft)
+
+    # The mapping changes which sheets a still references, so a still
+    # generated before this pass is keyed on the wrong parents and must say
+    # stale rather than claim fresh.
+    await recompute_staleness(db, job.meld_id)
+
+    job.cost_usd = result.cost_usd
+    await _close_hold(db, job, succeeded=True)
+    await mark_succeeded(db, job)
+    return JobOutcome(JobState.SUCCEEDED, retryable=False)
+
+
+async def map_shot_characters(ctx: dict[str, Any], job_id: str) -> str:
+    """The arq task. Same shape as generate_characters."""
+    async with SessionLocal() as db:
+        outcome = await run_map_shot_characters(db, uuid.UUID(job_id))
+        attempts = (
+            await db.execute(select(Job.attempts).where(Job.id == uuid.UUID(job_id)))
+        ).scalar_one_or_none()
+        await db.commit()
+
+    if outcome.retryable:
+        raise Retry(defer=2 ** (attempts or 1))
+    return outcome.state.value
+
+
+async def _load_refs(db: DbSession, still: ShotImage) -> tuple[list[bytes], list[str]]:
+    """The reference sheets this still was queued to use, as bytes, plus who
+    each one is.
+
+    Read from storage on every call, with no cache (M4-D10). A shot with
+    four characters is four reads; M3's roadmap flagged a cache here as
+    worth measuring before building, and it has not been measured.
+
+    Order is `ref_character_image_ids`, exactly as the service recorded it,
+    because still_prompt names the references in the order they are
+    attached. Sorting or regrouping them here would silently relabel every
+    face.
+    """
+    if not still.ref_character_image_ids:
+        return [], []
+
+    rows = (
+        await db.execute(
+            select(CharacterImage, Character)
+            .join(Character, CharacterImage.character_id == Character.id)
+            .where(CharacterImage.id.in_(still.ref_character_image_ids))
+        )
+    ).all()
+    by_id = {image.id: (image, character) for image, character in rows}
+
+    storage = get_storage()
+    data: list[bytes] = []
+    names: list[str] = []
+    for ref_id in still.ref_character_image_ids:
+        found = by_id.get(ref_id)
+        if found is None:
+            # A sheet that existed when the job was queued and does not now.
+            # Terminal: the hash this job carries describes a reference set
+            # that can no longer be assembled.
+            raise ProviderResponseError("A character sheet this shot needs has gone. Try again.")
+        image, character = found
+        asset = (
+            await db.execute(select(Asset).where(Asset.id == image.asset_id))
+        ).scalar_one_or_none()
+        if asset is None:
+            raise ProviderResponseError("A character sheet this shot needs has gone. Try again.")
+        try:
+            data.append(await storage.get(key=asset.storage_key))
+        except FileNotFoundError as exc:
+            raise ProviderResponseError(
+                "A character sheet this shot needs could not be read. Try again."
+            ) from exc
+        names.append(character.name or "an unnamed character")
+    return data, names
+
+
+async def run_generate_shot_image(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
+    job = await mark_running(db, job_id)
+    if job is None:
+        existing = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
+        state = JobState.CANCELLED if existing is None else existing.state
+        return JobOutcome(state, retryable=False)
+
+    still = (
+        await db.execute(select(ShotImage).where(ShotImage.id == job.target_id))
+    ).scalar_one_or_none()
+    shot = (
+        None
+        if still is None
+        else (await db.execute(select(Shot).where(Shot.id == still.shot_id))).scalar_one_or_none()
+    )
+    meld = (await db.execute(select(Meld).where(Meld.id == job.meld_id))).scalar_one_or_none()
+    if still is None or shot is None or meld is None:
+        await mark_failed(db, job, "This shot no longer exists.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    provider = get_image_provider()
+    try:
+        refs, names = await _load_refs(db, still)
+        result = await provider.generate(
+            prompt=still_prompt(shot, names), refs=refs, params=STILL_PARAMS
+        )
+        if not result.bytes_:
+            raise ProviderResponseError("The image model returned no image.")
+        extension = _IMAGE_EXTENSIONS.get(str(result.raw.get("mimeType", "image/png")))
+        if extension is None:
+            raise ProviderResponseError("The image model returned a format we cannot store.")
+    except ProviderError as exc:
+        logger.warning("generate_shot_image failed for job %s: %s", job.id, exc)
+        if exc.retryable and job.attempts < MAX_ATTEMPTS:
+            await mark_for_retry(db, job, str(exc))
+            return JobOutcome(JobState.QUEUED, retryable=True)
+        still.state = ArtifactState.FAILED
+        still.updated_at = datetime.now(UTC)
+        await mark_failed(db, job, str(exc))
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+    except Exception:
+        logger.exception("generate_shot_image crashed for job %s", job.id)
+        still.state = ArtifactState.FAILED
+        still.updated_at = datetime.now(UTC)
+        await mark_failed(db, job, "Generating the still failed unexpectedly. Try again.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    mime = str(result.raw.get("mimeType", "image/png"))
+    asset = await store_asset(
+        db, user_id=meld.user_id, data=result.bytes_, mime=mime, ext=extension
+    )
+
+    now = datetime.now(UTC)
+    still.asset_id = asset.id
+    still.content_hash = content_hash_for_shot_image(asset.sha256)
+    still.input_hash = job.input_hash
+    still.state = ArtifactState.FRESH
+    still.provider = result.provider
+    still.model = result.model
+    still.params = dict(STILL_PARAMS)
+    still.credits_spent = job.credits_held
+    still.updated_at = now
+
+    job.cost_usd = result.cost_usd
+    # The user may have edited the shot, or a character, while this ran.
+    # Rows carrying a hash that is no longer current must say stale rather
+    # than claim fresh.
+    await recompute_staleness(db, job.meld_id)
+    await _close_hold(db, job, succeeded=True)
+    await mark_succeeded(db, job)
+    return JobOutcome(JobState.SUCCEEDED, retryable=False)
+
+
+async def generate_shot_image(ctx: dict[str, Any], job_id: str) -> str:
+    """The arq task. Same shape as generate_character_image."""
+    async with SessionLocal() as db:
+        outcome = await run_generate_shot_image(db, uuid.UUID(job_id))
+        attempts = (
+            await db.execute(select(Job.attempts).where(Job.id == uuid.UUID(job_id)))
+        ).scalar_one_or_none()
+        await db.commit()
+
+    if outcome.retryable:
+        raise Retry(defer=2 ** (attempts or 1))
+    return outcome.state.value
+
+
+async def run_generate_speech(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
+    job = await mark_running(db, job_id)
+    if job is None:
+        existing = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
+        state = JobState.CANCELLED if existing is None else existing.state
+        return JobOutcome(state, retryable=False)
+
+    clip = (
+        await db.execute(select(AudioClip).where(AudioClip.id == job.target_id))
+    ).scalar_one_or_none()
+    meld = (await db.execute(select(Meld).where(Meld.id == job.meld_id))).scalar_one_or_none()
+    if clip is None or meld is None:
+        await mark_failed(db, job, "This shot no longer exists.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    provider = get_speech_provider()
+    try:
+        # The words and the voice are read from the clip row, not from the
+        # shot: the row is what the hold was priced against, and the user
+        # may have edited the shot since. Reading the shot here would let a
+        # job quietly record something the user never approved.
+        result = await provider.speak(text=clip.text, voice_id=clip.voice_id, params=SPEECH_PARAMS)
+        if not result.bytes_:
+            raise ProviderResponseError("The speech model returned no audio.")
+    except ProviderError as exc:
+        logger.warning("generate_speech failed for job %s: %s", job.id, exc)
+        if exc.retryable and job.attempts < MAX_ATTEMPTS:
+            await mark_for_retry(db, job, str(exc))
+            return JobOutcome(JobState.QUEUED, retryable=True)
+        clip.state = ArtifactState.FAILED
+        clip.updated_at = datetime.now(UTC)
+        await mark_failed(db, job, str(exc))
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+    except Exception:
+        logger.exception("generate_speech crashed for job %s", job.id)
+        clip.state = ArtifactState.FAILED
+        clip.updated_at = datetime.now(UTC)
+        await mark_failed(db, job, "Generating the audio failed unexpectedly. Try again.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    asset = await store_asset(
+        db, user_id=meld.user_id, data=result.bytes_, mime=WAV_MIME, ext="wav"
+    )
+
+    now = datetime.now(UTC)
+    clip.asset_id = asset.id
+    clip.content_hash = content_hash_for_audio_clip(asset.sha256)
+    clip.input_hash = job.input_hash
+    clip.state = ArtifactState.FRESH
+    clip.provider = result.provider
+    clip.model = result.model
+    clip.params = dict(SPEECH_PARAMS)
+    clip.credits_spent = job.credits_held
+    # Copied from the asset rather than recomputed: M5's scene spec lays
+    # out a timeline from this column and must not have to join to `assets`
+    # for a number that can be null on either side.
+    clip.duration_sec = asset.duration_sec
+    clip.updated_at = now
+
+    job.cost_usd = result.cost_usd
+    await recompute_staleness(db, job.meld_id)
+    await _close_hold(db, job, succeeded=True)
+    await mark_succeeded(db, job)
+    return JobOutcome(JobState.SUCCEEDED, retryable=False)
+
+
+async def generate_speech(ctx: dict[str, Any], job_id: str) -> str:
+    """The arq task. Same shape as generate_shot_image."""
+    async with SessionLocal() as db:
+        outcome = await run_generate_speech(db, uuid.UUID(job_id))
+        attempts = (
+            await db.execute(select(Job.attempts).where(Job.id == uuid.UUID(job_id)))
+        ).scalar_one_or_none()
+        await db.commit()
+
+    if outcome.retryable:
+        raise Retry(defer=2 ** (attempts or 1))
+    return outcome.state.value
+
+
 class WorkerSettings:
     """arq's entry point: `arq framemeld.worker.WorkerSettings`."""
 
@@ -361,6 +689,9 @@ class WorkerSettings:
         generate_script,
         generate_characters,
         generate_character_image,
+        map_shot_characters,
+        generate_shot_image,
+        generate_speech,
     ]
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     #: arq checks `job_try > max_tries` before executing, so this gates the

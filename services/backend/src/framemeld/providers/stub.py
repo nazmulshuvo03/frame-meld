@@ -76,6 +76,8 @@ class StubLLMProvider:
         # contract -- the prompt is prose and gets reworded.
         if json_schema.get("name") == "characters":
             payload: dict[str, Any] = {"characters": self._characters(user)}
+        elif json_schema.get("name") == "shot_characters":
+            payload = {"shots": self._shot_characters(user)}
         else:
             payload = {"scenes": self._scenes(user)}
 
@@ -87,6 +89,74 @@ class StubLLMProvider:
             model=self.model,
             raw={"stub": True},
         )
+
+    def _shot_characters(self, user: str) -> list[dict[str, Any]]:
+        """A mapping derived from the message build_casting_messages sent.
+
+        Parsed back out of the prompt rather than fixed, for the third time
+        and the same reason: a stub that returned "character 1 is in every
+        shot" would let a broken prompt-building path pass every test in
+        this milestone, and would never exercise the empty-list case that
+        inserts and establishing shots produce.
+
+        The rotation deliberately leaves some shots empty and gives some
+        two characters, because a still with no references and a still with
+        several take different paths through the worker.
+        """
+        names = self._cast_names(user)
+        count = self._shot_count(user)
+        if not names or not count:
+            return []
+
+        mapping: list[dict[str, Any]] = []
+        for number in range(1, count + 1):
+            # Every fourth shot has nobody in it -- an insert or a
+            # landscape -- so the no-reference path is always exercised.
+            if number % 4 == 0:
+                present: list[str] = []
+            elif number % 3 == 0 and len(names) > 1:
+                present = [names[(number - 1) % len(names)], names[number % len(names)]]
+            else:
+                present = [names[(number - 1) % len(names)]]
+            mapping.append(
+                {
+                    "shot": number,
+                    "characters": present,
+                    # The speaker is the first person present, or nobody.
+                    # Not always set, so the default-narrator-voice path is
+                    # exercised too.
+                    "speaker": present[0] if present else "",
+                }
+            )
+        return mapping
+
+    @staticmethod
+    def _cast_names(user: str) -> list[str]:
+        """The names out of the CAST block build_casting_messages wrote.
+
+        Keyed on the "- " bullet and the " (" that precedes the role, which
+        is the shape that function produces. A change there must change
+        this, and the casting test is what would catch it.
+        """
+        names = []
+        for line in user.splitlines():
+            line = line.strip()
+            if not line.startswith("- "):
+                continue
+            name = line[2:].split(" (", 1)[0].strip()
+            if name:
+                names.append(name)
+        return names
+
+    @staticmethod
+    def _shot_count(user: str) -> int:
+        """How many numbered shots the SHOTS block listed."""
+        count = 0
+        for line in user.splitlines():
+            head = line.strip().split(".", 1)[0]
+            if head.isdigit():
+                count = max(count, int(head))
+        return count
 
     def _characters(self, user: str) -> list[dict[str, str]]:
         """A cast derived from the story's own proper nouns.

@@ -8,6 +8,7 @@ from framemeld.config import settings
 from framemeld.credits.router import router as credits_router
 from framemeld.melds.router import router as melds_router
 from framemeld.script.router import router as script_router
+from framemeld.shots.router import router as shots_router
 
 app = FastAPI(
     title="FrameMeld API",
@@ -36,6 +37,7 @@ app.include_router(melds_router)
 app.include_router(script_router)
 # Same prefix again (/melds/{meld_id}); see the note above.
 app.include_router(cast_router)
+app.include_router(shots_router)
 
 
 @app.get("/health")

@@ -18,9 +18,20 @@ PRICING_VERSION = 1
 #: generate_character_image: ~$0.02 (Imagen 4 Fast) to ~$0.04 (Nano Banana)
 #: per image -- see providers/rates.py, and re-check both before changing
 #: this number.
+#: map_shot_characters: one LLM call over the cast and the shot list,
+#: the same order of magnitude as the extraction above.
+#: generate_shot_image: the same model and the same provider cost as a
+#: character sheet, so the same price -- a still is not more expensive to
+#: make just because it matters more.
+#: generate_speech: a few hundred characters of TTS, well under a tenth of
+#: a cent at Gemini's rate (providers/rates.py). Priced above zero anyway,
+#: because a free action is one a script can call thirty thousand times.
 QUOTES: dict[JobKind, int] = {
     JobKind.GENERATE_CHARACTERS: 5,
     JobKind.GENERATE_CHARACTER_IMAGE: 12,
+    JobKind.MAP_SHOT_CHARACTERS: 5,
+    JobKind.GENERATE_SHOT_IMAGE: 12,
+    JobKind.GENERATE_SPEECH: 2,
 }
 
 
