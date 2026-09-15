@@ -22,6 +22,13 @@ from framemeld.models.script import (
     Scene,
     Shot,
 )
+from framemeld.models.shots import (
+    AudioClip,
+    AudioKind,
+    AudioOwnerType,
+    ShotCharacter,
+    ShotImage,
+)
 from framemeld.models.user import Session, User
 
 __all__ = [
@@ -30,6 +37,9 @@ __all__ = [
     "MAX_SHOT_SECONDS",
     "ArtifactState",
     "Asset",
+    "AudioClip",
+    "AudioKind",
+    "AudioOwnerType",
     "CameraAngle",
     "Character",
     "CharacterImage",
@@ -48,6 +58,8 @@ __all__ = [
     "Scene",
     "Session",
     "Shot",
+    "ShotCharacter",
+    "ShotImage",
     "Story",
     "User",
 ]

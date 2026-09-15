@@ -14,11 +14,19 @@ from framemeld.models.columns import enum_column
 class JobKind(enum.StrEnum):
     """The full list from spec section 5.4. Only generate_script is reachable
     in M2; the rest are declared now so later milestones add rows rather than
-    migrations — enum_column writes a CHECK, and widening one means an ALTER."""
+    migrations — enum_column writes a CHECK, and widening one means an ALTER.
+
+    `map_shot_characters` is the one kind spec section 5.4 did not list. M4-D1
+    made the shot/character mapping a first-class artifact with its own hash
+    and its own price rather than an un-versioned side effect of the cast
+    extraction, and a job kind is what that means. It cost the ALTER this
+    docstring warns about; the spec is corrected in place.
+    """
 
     GENERATE_SCRIPT = "generate_script"
     GENERATE_CHARACTERS = "generate_characters"
     GENERATE_CHARACTER_IMAGE = "generate_character_image"
+    MAP_SHOT_CHARACTERS = "map_shot_characters"
     GENERATE_SHOT_IMAGE = "generate_shot_image"
     GENERATE_SPEECH = "generate_speech"
     GENERATE_MUSIC = "generate_music"
