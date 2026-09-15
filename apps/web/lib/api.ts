@@ -240,6 +240,10 @@ export type Character = {
   role: CharacterRole;
   description: string;
   appearance: string;
+  /** Which voice reads this character's lines. Inside the character's
+   *  content hash and outside their visual hash, so changing it invalidates
+   *  their dialogue and leaves their sheet alone. */
+  voice_id: string | null;
   state: string;
   content_hash: string;
   updated_at: string;
@@ -272,7 +276,7 @@ export const generateSheet = (meldId: string, characterId: string) =>
 // Narrowed to exactly what the API's CharacterPatch declares, so passing
 // `state` or `content_hash` is a compile error rather than a 422.
 export type CharacterPatch = Partial<
-  Pick<Character, "name" | "role" | "description" | "appearance">
+  Pick<Character, "name" | "role" | "description" | "appearance" | "voice_id">
 >;
 
 export const updateCharacter = (meldId: string, characterId: string, patch: CharacterPatch) =>
@@ -283,3 +287,65 @@ export const updateCharacter = (meldId: string, characterId: string, patch: Char
 
 export const getBalance = () => request<{ balance: number }>("/credits");
 export const getPricing = () => request<Pricing>("/credits/pricing");
+
+// --- Shots: stills and speech (M4) ---------------------------------------
+
+export type ShotImage = {
+  id: string;
+  state: string;
+  /** Null until a generation succeeds. */
+  asset_id: string | null;
+  /** Which sheets this picture was drawn from, in the order they were
+   *  attached. Exposed because "why does this face look wrong" is otherwise
+   *  unanswerable from the outside. */
+  ref_character_image_ids: string[];
+  credits_spent: number;
+  updated_at: string;
+};
+
+export type AudioClip = {
+  id: string;
+  kind: "narration" | "dialogue" | "music" | "sfx";
+  state: string;
+  asset_id: string | null;
+  text: string;
+  voice_id: string;
+  /** A decimal string, like a shot's duration, for the same reason. */
+  duration_sec: string | null;
+  credits_spent: number;
+  updated_at: string;
+};
+
+/** A shot plus everything generated from it. Extends Shot rather than
+ *  restating it: the Script and Shots pages show the same rows. */
+export type ShotMedia = Shot & {
+  character_ids: string[];
+  character_names: string[];
+  still: ShotImage | null;
+  audio: AudioClip | null;
+};
+
+export type ShotsView = {
+  shots: ShotMedia[];
+  stale_stills: number;
+  stale_audio: number;
+  /** Whether anyone has been placed in a shot yet. "Nobody is in any shot"
+   *  and "nobody has been placed yet" look identical from the rows alone. */
+  cast_into_shots: boolean;
+};
+
+export const getShots = (meldId: string) => request<ShotsView>(`/melds/${meldId}/shots`);
+
+export const castShots = (meldId: string) =>
+  request<Job>(`/melds/${meldId}/shots/cast`, { method: "POST" });
+
+export const generateStill = (meldId: string, shotId: string) =>
+  request<Job>(`/melds/${meldId}/shots/${shotId}/still`, { method: "POST" });
+
+export const generateSpeech = (meldId: string, shotId: string) =>
+  request<Job>(`/melds/${meldId}/shots/${shotId}/speech`, { method: "POST" });
+
+/** Served rather than hard-coded here, so the list cannot drift from the one
+ *  the speech adapter will actually accept — a voice the provider rejects is
+ *  a failed job and a refunded credit, for a value this UI offered. */
+export const getVoices = (meldId: string) => request<string[]>(`/melds/${meldId}/voices`);

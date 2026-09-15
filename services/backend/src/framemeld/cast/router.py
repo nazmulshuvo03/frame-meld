@@ -12,6 +12,7 @@ from framemeld.db import get_session
 from framemeld.jobs.queue import Queue, get_queue
 from framemeld.jobs.schemas import JobOut
 from framemeld.moderation.service import Blocked
+from framemeld.providers.speech.voices import VOICE_IDS
 
 router = APIRouter(prefix="/melds/{meld_id}", tags=["cast"])
 
@@ -55,11 +56,30 @@ def _as_character(character) -> CharacterOut:
         role=character.role,
         description=character.description,
         appearance=character.appearance,
+        voice_id=character.voice_id,
         state=character.state,
         content_hash=character.content_hash,
         updated_at=character.updated_at,
         sheet=CharacterImageOut.model_validate(sheet) if sheet is not None else None,
     )
+
+
+@router.get("/voices", response_model=list[str])
+async def get_voices(meld_id: uuid.UUID, user: CurrentUser, db: Db) -> list[str]:
+    """The voices a character may be given.
+
+    Served rather than hard-coded in the frontend so the list cannot drift
+    from the one the speech adapter will actually accept -- a voice the
+    provider rejects is a failed job and a refunded credit, for a value the
+    UI offered.
+
+    Authorised through the Meld like every other route under this prefix,
+    even though the list is the same for everybody: an anonymous endpoint
+    is a thing to think about, and nothing needs one.
+    """
+    if await service.get_cast(db, user.id, meld_id) is None:
+        raise _not_found()
+    return list(VOICE_IDS)
 
 
 @router.get("/cast", response_model=CastOut)

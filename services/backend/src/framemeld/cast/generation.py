@@ -12,6 +12,7 @@ from framemeld.models.cast import MAX_CHARACTERS, Character, CharacterRole
 from framemeld.models.meld import Meld, MeldStage
 from framemeld.models.script import ArtifactState
 from framemeld.providers.base import ProviderResponseError
+from framemeld.providers.speech.voices import voice_for_index
 
 CHARACTERS_JSON_SCHEMA: dict[str, Any] = {
     "name": "characters",
@@ -163,6 +164,12 @@ async def apply_characters(db: DbSession, meld: Meld, draft: CastDraft, input_ha
             role=drafted.role,
             description=drafted.description,
             appearance=drafted.appearance,
+            # Seeded so a fresh cast can be heard immediately rather than
+            # needing eight voices chosen first. Deterministic, because
+            # voice_id is inside content_hash_for_character and a random
+            # seed would give the same story a different hash on every
+            # extraction. The user can change it; nothing else ever does.
+            voice_id=voice_for_index(index),
             content_hash="",
             input_hash=input_hash,
             state=ArtifactState.FRESH,

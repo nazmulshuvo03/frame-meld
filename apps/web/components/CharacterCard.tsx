@@ -21,6 +21,7 @@ export function CharacterCard({
   sheetCredits,
   balance,
   busy,
+  voices,
   onSaved,
   onGenerateSheet,
 }: {
@@ -29,6 +30,7 @@ export function CharacterCard({
   sheetCredits: number;
   balance: number | null;
   busy: boolean;
+  voices: string[];
   onSaved: (character: Character) => void;
   onGenerateSheet: (character: Character) => void;
 }) {
@@ -53,6 +55,7 @@ export function CharacterCard({
         role: next.role,
         description: next.description,
         appearance: next.appearance,
+        voice_id: next.voice_id,
       });
       onSaved(saved);
     },
@@ -118,6 +121,31 @@ export function CharacterCard({
               rows={2}
               className={FIELD}
             />
+          </label>
+
+          <label className="mb-2 block">
+            <span className="mb-1 block text-xs text-neutral-500">
+              Voice — reads this character&apos;s lines. Changing it marks their audio out of
+              date, and leaves their sheet alone.
+            </span>
+            <select
+              value={character.voice_id ?? ""}
+              onChange={(e) => edit("voice_id", e.target.value)}
+              className={FIELD}
+            >
+              {/* Present only until the list lands, and only when the
+                  character already has a voice this page has not heard of --
+                  a <select> whose value is absent from its options silently
+                  renders as the first option instead. */}
+              {character.voice_id && !voices.includes(character.voice_id) && (
+                <option value={character.voice_id}>{character.voice_id}</option>
+              )}
+              {voices.map((voice) => (
+                <option key={voice} value={voice}>
+                  {voice}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label className="block">

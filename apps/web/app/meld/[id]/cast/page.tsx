@@ -14,6 +14,7 @@ import {
   getBalance,
   getCast,
   getPricing,
+  getVoices,
   type CastView,
   type Character,
   type Job,
@@ -33,6 +34,7 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
   const [cast, setCast] = useState<CastView | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [quotes, setQuotes] = useState<Record<string, number> | null>(null);
+  const [voices, setVoices] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -66,7 +68,11 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
     // A price list failure is not worth a banner: the fallbacks above keep
     // the buttons readable, and the API is still the one that refuses.
     getPricing().then((pricing) => setQuotes(pricing.quotes), () => {});
-  }, [load, loadBalance]);
+    // Same trade as the price list: a failure is not worth a banner. The
+    // voice <select> falls back to showing only the character's current
+    // voice, which is the one value that must never be lost.
+    getVoices(id).then(setVoices, () => {});
+  }, [id, load, loadBalance]);
 
   const onSettled = useCallback(
     (job: Job) => {
@@ -161,9 +167,14 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6">
-        <Link href={`/meld/${id}/script`} className="text-sm text-neutral-500 hover:underline">
-          ← Script
-        </Link>
+        <div className="flex items-baseline justify-between">
+          <Link href={`/meld/${id}/script`} className="text-sm text-neutral-500 hover:underline">
+            ← Script
+          </Link>
+          <Link href={`/meld/${id}/shots`} className="text-sm text-neutral-500 hover:underline">
+            Next up: Shots →
+          </Link>
+        </div>
         <div className="mt-1 flex items-baseline justify-between gap-4">
           <h1 className="text-2xl font-semibold">Cast</h1>
           <div className="flex items-center gap-3">
@@ -230,6 +241,7 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
               sheetCredits={sheetCredits}
               balance={balance}
               busy={busy}
+              voices={voices}
               onSaved={onSaved}
               onGenerateSheet={onGenerateSheet}
             />

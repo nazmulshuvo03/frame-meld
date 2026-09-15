@@ -31,6 +31,10 @@ class CharacterOut(BaseModel):
     role: CharacterRole
     description: str
     appearance: str
+    #: Which voice reads this character's lines. Inside the character's
+    #: content_hash and outside their visual hash, so changing it
+    #: invalidates their dialogue and leaves their sheet alone.
+    voice_id: str | None
     state: str
     content_hash: str
     updated_at: datetime
@@ -57,3 +61,4 @@ class CharacterPatch(_RejectsExplicitNull, BaseModel):
     role: CharacterRole | None = None
     description: str | None = Field(default=None, max_length=4000)
     appearance: str | None = Field(default=None, max_length=4000)
+    voice_id: str | None = Field(default=None, max_length=80)
