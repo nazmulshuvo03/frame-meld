@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # the cheapest current Gemini image model at 1K ($0.039/image), and it
     # takes the same generateContent request shape as the LLM adapter.
     image_model: str = "gemini-2.5-flash-image"
+    # Same shape and same default as the other two providers (M4-D9).
+    # Unlike images, Gemini TTS does have a free tier -- but no call has
+    # ever been made from this account, so the adapter is unverified and
+    # the default stays `stub`.
+    speech_provider: str = "stub"
+    speech_model: str = "gemini-2.5-flash-preview-tts"
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     gemini_api_key: str = ""

@@ -1,7 +1,11 @@
+import contextlib
 import hashlib
+import io
 import struct
 import uuid
+import wave
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
@@ -28,6 +32,30 @@ def png_dimensions(data: bytes) -> tuple[int, int] | None:
     return width, height
 
 
+def wav_duration(data: bytes) -> Decimal | None:
+    """How long a WAV runs, in seconds, or None.
+
+    The audio sibling of png_dimensions above, and the same trade: stdlib
+    `wave` rather than a media library, because the only thing this
+    codebase needs from a decoder is frames divided by frame rate. Anything
+    that is not a readable WAV returns None and the column stays null --
+    M5's scene spec wants this number, but a generation must not fail
+    because a provider sent a container we cannot measure.
+
+    Quantised to the column's scale (Numeric(8, 2)) with Postgres's
+    rounding mode, for the same reason script/hashes.py quantises a shot's
+    duration: a value that changes when it is read back would make the row
+    look edited.
+    """
+    with contextlib.suppress(wave.Error, EOFError, ValueError):
+        with wave.open(io.BytesIO(data), "rb") as source:
+            rate = source.getframerate()
+            if rate:
+                seconds = Decimal(source.getnframes()) / Decimal(rate)
+                return seconds.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return None
+
+
 async def store_asset(
     db: DbSession, *, user_id: uuid.UUID, data: bytes, mime: str, ext: str
 ) -> Asset:
@@ -52,6 +80,7 @@ async def store_asset(
         sha256=hashlib.sha256(data).hexdigest(),
         width=dimensions[0] if dimensions else None,
         height=dimensions[1] if dimensions else None,
+        duration_sec=wav_duration(data),
         created_at=datetime.now(UTC),
     )
     db.add(asset)

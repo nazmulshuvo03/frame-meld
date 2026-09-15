@@ -35,6 +35,17 @@ _IMAGE_RATES: dict[str, Decimal] = {
     "gemini-3-pro-image": Decimal("0.134"),
 }
 
+#: USD per 1,000,000 input characters. TTS is billed on what you send,
+#: not on what comes back, so there is no output side to this one.
+#: Captured from https://ai.google.dev/gemini-api/docs/pricing alongside the
+#: tables above; like them, it is checked against the page rather than
+#: trusted forever, and like them it has NOT been confirmed by a live call
+#: from this account (see the adapter's docstring).
+_SPEECH_RATES: dict[str, Decimal] = {
+    "gemini-2.5-flash-preview-tts": Decimal("10.00"),
+    "gemini-2.5-pro-preview-tts": Decimal("20.00"),
+}
+
 _MILLION = Decimal("1000000")
 
 
@@ -64,3 +75,17 @@ def usd_for_image(model: str, count: int = 1) -> Decimal:
         logger.warning("no image rate for model %s; recording cost 0", model)
         return Decimal("0")
     return rate * count
+
+
+def usd_for_speech(model: str, characters: int) -> Decimal:
+    """What a TTS call cost, from the length of the text that was sent.
+
+    Same fail-soft rule as the two above: an unpriced model is logged and
+    costed as zero rather than raising. This number is margin
+    observability, never the billing input (M3-D5).
+    """
+    rate = _SPEECH_RATES.get(model)
+    if rate is None:
+        logger.warning("no speech rate for model %s; recording cost 0", model)
+        return Decimal("0")
+    return rate * characters / _MILLION
