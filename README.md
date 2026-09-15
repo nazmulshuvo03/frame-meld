@@ -10,49 +10,57 @@ Story → Script → Cast → Shots → Film.
 
 ## Status
 
-**M3 (Cast) complete.** A user sees what a generation will cost before
-they click it, spends real credits on a real image, and gets every credit
-back when it fails. An LLM pass extracts the cast from the story, each
-character gets a generated sheet image, and editing a character
-invalidates exactly their own artwork and nobody else's.
+**M4 (Shots) complete.** Every shot gets a still drawn from the character
+sheets of the people actually in it, plus an audio clip in the speaker's
+voice. An LLM pass works out who is in which shot; editing a character
+marks exactly the stills that referenced them stale, and nothing else.
+This is the first milestone with a multi-parent hash — a still depends on
+its shot *and* on every sheet it was drawn from — and the first with three
+independent provider domains, so switching image models re-draws nothing
+that was spoken and switching voices re-records nothing that was drawn.
 
 What's verified and how:
 
-- The backend test suite (410 tests) passes, plus a frontend suite (20
-  tests) covering the autosave hook, the API client, and the quote button
-  — see [Tests](#tests) below.
-- **The migration chain builds the schema from nothing.** All six
+- The backend test suite (516 tests) passes, plus a frontend suite (29
+  tests) covering the autosave hook, the API client, the quote button and
+  the shot card — see [Tests](#tests) below.
+- **The migration chain builds the schema from nothing.** All seven
   migrations applied in order against an empty database, and `alembic
-  check` reports no drift between the chain and the models. This was an
-  open gap at the end of M2 and is now closed.
+  check` reports no drift between the chain and the models.
 - Money rules are enforced at the API and pinned by tests: a hold is taken
   in the same transaction as the job row; a second click on unchanged
   inputs is a cache hit that charges nothing; too few credits is a **402**
   that creates no job and moves no credits; a failed generation refunds in
   full; and exactly one settle or refund may ever close a hold, because
   arq redelivers messages and an append-only ledger has no undo.
-- **The whole M3 flow has been driven through a real browser** against a
-  real backend, a real worker and a **real Gemini call** for extraction
-  (the image provider was the stub — see Known gaps):
-  - Signup granted 500 credits; the Cast page showed
-    **"Generate cast · 5 credits"** — the price on the button face, before
-    the click.
-  - Generating the cast produced two story-specific characters via
-    polling with no manual reload, and moved the balance by exactly the
-    quote. Each `appearance` was purely physical, with no plot in it.
-  - Generating a sheet showed its price first, produced an image that
-    appeared without a reload, and charged exactly the quote. Two
-    characters got two different images.
-  - **Editing a character's description left their sheet fresh and
-    charged nothing** — the two-hash rule earning its keep. Editing their
-    *appearance* marked the sheet "Out of date" while **still displaying
-    it**, and still charged nothing.
-  - Pressing Generate twice quickly produced one job, one image, and one
-    charge. Regenerating with unchanged inputs returned `succeeded`
+- **The whole M4 flow has been driven through a real browser** against a
+  real backend and a real worker (all three providers were the stubs —
+  see Known gaps):
+  - The Shots page listed 11 shots in **film order**, and the batch button
+    read **"Draw the 11 remaining · 132 credits"** — the price of the whole
+    action on the button face, before the click.
+  - Casting the shots placed characters into frames via polling with no
+    reload, and moved the balance by exactly the quote. Shots with nobody
+    in them rendered as "nobody in frame", which is a correct answer for an
+    insert, not a missing one.
+  - Asking for a still whose character had no sheet was a **422 naming
+    that character**, with the balance unmoved.
+  - A still for a two-character shot was drawn from **two references**, and
+    two shots got two different pictures.
+  - Generating audio produced a player without a reload, **in the speaker's
+    voice**, with a real duration read off the WAV.
+  - **Editing a character's description left everything fresh and charged
+    nothing.** Editing their *appearance* and redrawing their sheet marked
+    **exactly the still that referenced them** stale — the other still
+    stayed fresh, and both kept their images.
+  - Changing a character's voice marked their clip stale, **moved no
+    still**, and left their sheet fresh.
+  - "Draw the 9 remaining" drained one job at a time to 11 stills with 11
+    distinct assets. Re-asking for an unchanged still returned `succeeded`
     immediately and cost zero.
-  - With the balance below the sheet price, both 12-credit buttons
-    disabled themselves and said "You need 7 more credits", while the
-    5-credit action stayed enabled.
+  - A **real provider 429** retried three times with 2 s then 4 s backoff,
+    failed terminally, and returned the balance to exactly where it
+    started.
 - Ownership checks are enforced at the API: another user's cast,
   character, or asset returns 404 (not 403), and a logged-out request
   returns 401.
@@ -67,11 +75,13 @@ What's verified and how:
 | `services/backend/src/framemeld/storage` | the `Storage` protocol and the local-disk backend |
 | `services/backend/src/framemeld/assets` | the file registry and the authenticated asset route |
 | `services/backend/src/framemeld/moderation` | the classifier that gates generation before a hold |
+| `services/backend/src/framemeld/shots` | shot/character casting, the multi-parent hash, the Shots API |
 | `services/backend/src/framemeld/providers/images` | `ImageProvider`, its stub, and the Gemini adapter |
-| `apps/web` | Next.js frontend — signup/login, Meld list, story editor, Script page, Cast page |
+| `services/backend/src/framemeld/providers/speech` | `SpeechProvider`, the voice list, its stub, and the Gemini TTS adapter |
+| `apps/web` | Next.js frontend — signup/login, Meld list, story editor, Script page, Cast page, Shots page |
 | `docs/superpowers/specs` | Design spec |
 | `docs/superpowers/plans` | Per-milestone implementation plans |
-| `docs/superpowers/m1-decisions.md`, `m2-decisions.md`, `m3-decisions.md` | Execution ledgers — the *why* behind non-obvious code |
+| `docs/superpowers/m1-decisions.md` … `m4-decisions.md` | Execution ledgers — the *why* behind non-obvious code |
 
 ## Running locally
 
@@ -106,13 +116,19 @@ Then open <http://localhost:3000>. API docs are at <http://localhost:8000/docs>.
 **Only ever run one of each process.** `config.py` caches settings with `@lru_cache`, so a
 server or worker left running from before an `.env` edit keeps the old values and will
 happily pick up jobs with them — which looks exactly like a staleness bug. This has now
-cost two milestones an hour each (see `m2-decisions.md` and `m3-decisions.md`).
+cost three milestones an hour each (see `m2-decisions.md`, `m3-decisions.md` and
+`m4-decisions.md`). `taskkill` on whatever holds the port is **not** enough — `conda run`
+wraps the process, so the child survives. Kill `arq.exe` and `uvicorn.exe` by name and
+confirm exactly one of each. A job's `cost_usd` is the cheapest way to tell which provider
+actually ran: zero means the stub.
 
-`alembic upgrade head` applies six migrations, in order: `7d9b40163474` (users and
+`alembic upgrade head` applies seven migrations, in order: `7d9b40163474` (users and
 sessions), `8cea41eb5150` (melds and stories), `4440a9739020` (renames
 `stories.input_hash` to `content_hash`), `cd586f9b74e2` (scenes, shots, jobs),
 `63b07598bddb` (credits, cast, assets, `jobs.cost_usd`), `abc2ff5e822a`
-(`melds.moderation_hash`).
+(`melds.moderation_hash`), `77f9548e4df1` (`shot_characters`, `shot_images`, `audio_clips`,
+and a hand-written widening of the `job_kind` CHECK — autogenerate does not diff a CHECK
+body, so a new job kind produces no migration at all unless you write it).
 
 ### Granting credits
 
@@ -137,6 +153,9 @@ It refuses a negative amount rather than doubling as a clawback.
   `gemini` spends real money**: image generation has no free tier and is billed per image.
   Defaults to `gemini-2.5-flash-image`; the Imagen 4 family was shut down on 2026-08-17 and
   is not a valid choice.
+- `SPEECH_PROVIDER` / `SPEECH_MODEL` — `stub` (default) or `gemini`. Unlike images,
+  Gemini TTS has a free tier — but no call has ever succeeded from this account, so the
+  adapter is unverified (M4-D9). Defaults to `gemini-2.5-flash-preview-tts`.
 - `STORAGE_BACKEND` / `STORAGE_LOCAL_ROOT` — `local` (default), writing under `./var/assets`,
   which is gitignored.
 - `MODERATION_ENABLED` — `false` by default, because the stub LLM cannot classify anything.
@@ -154,15 +173,16 @@ conda run --no-capture-output -n framemeld ruff check src tests
 conda run --no-capture-output -n framemeld ruff format --check src tests
 ```
 
-`pytest` passes: **410 passed, 3 skipped**. All three skips are opt-in live-API calls:
-`FRAMEMELD_LIVE_LLM=1` for `test_providers_openrouter.py` / `test_providers_gemini.py`, and
+`pytest` passes: **516 passed, 4 skipped**. All four skips are opt-in live-API calls:
+`FRAMEMELD_LIVE_LLM=1` for `test_providers_openrouter.py` / `test_providers_gemini.py`,
 `FRAMEMELD_LIVE_IMAGE=1` for `test_providers_image_gemini.py` (a separate flag, because that
-one spends money). `ruff check` and `ruff format --check` are both clean.
+one spends money), and `FRAMEMELD_LIVE_SPEECH=1` for `test_providers_speech_gemini.py`.
+`ruff check` and `ruff format --check` are both clean.
 
 Every test always runs against the deterministic stub providers regardless of `.env` —
-`conftest.py` forces **both** the LLM and the image provider, so a `.env` edit can never
-make the suite reach the network or spend money — and each test writes assets into its own
-temporary directory.
+`conftest.py` forces the LLM and the image provider, and `SPEECH_PROVIDER` defaults to the
+stub, so a `.env` edit can never make the suite reach the network or spend money — and each
+test writes assets into its own temporary directory.
 
 To prove the migration chain still builds the schema from nothing, without destroying your
 dev data:
@@ -183,10 +203,11 @@ npm test
 npx tsc --noEmit && npm run lint && npm run build
 ```
 
-`npm test` (Vitest) passes: **20 passed** — 11 on `useAutosave`, 4 on the API client's
-timeout and error handling, 5 on `QuoteButton`'s affordability rules. `npm run build`
-compiles and prerenders every static route cleanly; `/meld/[id]`, `/meld/[id]/script` and
-`/meld/[id]/cast` are server-rendered on demand.
+`npm test` (Vitest) passes: **29 passed** — 11 on `useAutosave`, 4 on the API client's
+timeout and error handling, 5 on `QuoteButton`'s affordability rules, and 9 on
+`ShotMediaCard`. `npm run build` compiles and prerenders every static route cleanly;
+`/meld/[id]`, `/meld/[id]/script`, `/meld/[id]/cast` and `/meld/[id]/shots` are
+server-rendered on demand.
 
 ## Architecture notes
 
@@ -211,6 +232,21 @@ Hashing the full `content_hash` in (as M3 first did) claims a dependency that do
 exist, and makes rewriting a backstory invalidate artwork that would come back
 byte-identical. That is precisely what splitting `appearance` out of `description` was for.
 
+M4 generalised this and paid for the lesson twice over. There are now five such
+projections, and the rule is: **hash exactly the fields that reach the prompt, and nothing
+else.** Too wide charges the user to regenerate byte-identical work. Too wide *and
+self-referential* charges them forever — `map_shot_characters` writes
+`shots.speaker_character_id`, so keying it on the shot's whole `content_hash` meant the job
+moved its own idempotency key every time it succeeded and could never be a cache hit.
+`m4-decisions.md` has the full account; the cache-hit test is the only thing that found it.
+
+**A still has more than one parent.** `shot_image_input_hash` covers the shot's visual hash
+*and* the sorted `content_hash` of every character sheet the still was drawn from (spec
+§4.1). That is the link that catches "the character changed" — the case that otherwise
+silently ships a film where a face changes halfway through. Sorted, because the order the
+sheets came back in is a query-plan detail, and a hash that depended on it would charge a
+user to redraw an identical picture the first time Postgres changed its mind.
+
 **Credits are integers and the balance is never stored.** It is `SUM(delta)` over the
 append-only `credit_ledger`, read inside a transaction holding a `FOR UPDATE` lock on the
 user's row — because SUM-then-INSERT is a time-of-check/time-of-use race that lets two
@@ -220,8 +256,21 @@ more was, so a balance can never go further negative than the number the user ag
 
 ## Known gaps
 
-Intentional M3 scope cuts and open issues, so a reviewer doesn't mistake
+Intentional scope cuts and open issues, so a reviewer doesn't mistake
 them for oversights:
+
+- **The shot/character casting pass has never run against a live language model.** Gemini's
+  free tier answered 429 on every attempt during M4's verification, so the browser pass ran
+  on the stub. The mapping logic, the money paths and the staleness behaviour are all
+  covered — but **the quality of a real model's answer is unknown**: whether it reliably
+  tells "seen in the frame" from "mentioned", and whether it returns one entry per shot.
+  First thing to check when quota allows.
+- **`GeminiSpeechProvider` has never made a successful call.** Unlike image generation,
+  Gemini TTS has a free tier, so this is expected to work — but the PCM-to-WAV wrapping
+  follows the documented `audio/L16` shape rather than an observed one, and that is the part
+  most likely to be wrong. Run
+  `FRAMEMELD_LIVE_SPEECH=1 pytest tests/test_providers_speech_gemini.py` and correct
+  `_extract_audio` / `_to_wav` before trusting it with a user's credits.
 
 - **`GeminiImageProvider`'s success path has never run against the live API.** The probe
   M3-D11 required did run, and found that image generation has zero free-tier quota and
@@ -252,7 +301,19 @@ them for oversights:
   nothing sweeps them up.
 - **No add, delete, or reorder for scenes, shots or characters.** Regeneration replaces
   rather than merging.
-- **`shot_characters` does not exist yet** (M3-D2) — M4 creates and populates it.
+- **No reference-sheet cache** (M4-D10). A four-character shot reads four sheets from
+  storage on every still. M3's roadmap flagged a cache here as worth measuring before
+  building; it has not been measured.
+- **No batch job.** "Draw the N remaining" is N ordinary per-shot jobs run one at a time
+  (M4-D5), so a shot that fails refunds its own credit and the rest still get their
+  pictures. `settle`'s variable-units path is still unexercised and belongs to M6's
+  resumable render.
+- **`shot_images.seed` is declared and never set** — no configured provider accepts one —
+  and `audio_clips`' `music`/`sfx` kinds and `meld` owner type are declared and never
+  produced. M5's music is the first writer.
+- **Dark mode is unstyled.** Every page uses fixed `text-neutral-*` colours with no
+  dark-mode variants, so under a dark OS theme some text renders dark-on-dark. This affects
+  every page equally and is a whole-app theming decision, not a bug in any one of them.
 - **Changing `LLM_MODEL` marks every script and cast stale; changing `IMAGE_MODEL` marks
   every sheet stale.** True rather than surprising — regenerating really would produce
   something different — but it is a Meld-wide effect from an operator config change.

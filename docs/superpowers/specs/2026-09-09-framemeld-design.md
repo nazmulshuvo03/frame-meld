@@ -386,8 +386,13 @@ rather than expensive.
 
 **Job kinds:**
 `generate_script` · `generate_characters` · `generate_character_image` ·
-`generate_shot_image` · `generate_speech` · `generate_music` ·
+`map_shot_characters` · `generate_shot_image` · `generate_speech` · `generate_music` ·
 `render_preview` · `generate_shot_clip` · `render_final`
+
+> **Correction (M4, implemented).** `map_shot_characters` was added here (M4-D1). Working
+> out which characters are in which shot needs an LLM pass, and that pass needs its own
+> `input_hash`, its own price and its own button, or it is an un-versioned side effect of
+> something else. It also writes `shots.speaker_character_id`, which nothing else can.
 
 **Retry policy:** 3 attempts with exponential backoff on transport and 5xx errors.
 Provider content refusals are terminal — no retry, full credit refund, reason shown.
@@ -441,8 +446,8 @@ billing) and a Gemini API key with **$10/month in Google Cloud credit** attached
 | Stage | Local dev default | Free via API key? | Notes |
 |---|---|---|---|
 | Script, characters, moderation (`LLMProvider`) | **Gemini Flash-Lite** (`gemini-flash-lite-latest`) | Yes, rate-limited | New default for `LLM_PROVIDER`; OpenRouter's adapter is kept and still selectable, unchanged |
-| Speech (`SpeechProvider`) | Gemini native TTS (`gemini-*-flash-tts-preview`) | Yes, rate-limited | Not built yet — arrives with M4 |
-| Character sheets / shot stills (`ImageProvider`) | Nano Banana or Imagen 4 Fast | **No** — paid, ~$0.02–0.04/image | Not built yet — arrives with M3/M4. Funded from the $10/month credit |
+| Speech (`SpeechProvider`) | Gemini native TTS (`gemini-2.5-flash-preview-tts`) | Yes, rate-limited | **Adapter built (M4)**, never successfully called — `SPEECH_PROVIDER` defaults to `stub` (M4-D9) |
+| Character sheets / shot stills (`ImageProvider`) | `gemini-2.5-flash-image` | **No** — paid, ~$0.04/image | **Adapter built (M3)**, never successfully called — no billing on the key's project. `IMAGE_PROVIDER` defaults to `stub` |
 | Music (`MusicProvider`) | Lyria (clip or full-length) | **No** — paid, ~$0.04–0.08/track | Not built yet — arrives with M5 |
 | Image-to-video (`VideoProvider`) | Veo 3.1 Lite, 720p | **No** — paid, $0.05/sec | Not built yet — arrives with M6. By far the dominant cost: ≈150s per 30-shot film ≈ $7.50, so the $10 credit funds roughly one full test film a month |
 
@@ -562,6 +567,27 @@ The `assets` table it was to introduce already exists, from M3 (M3-D1).
 **Done when:** every shot has a still whose characters visibly match their sheets, plus
 an audio clip; editing a character marks exactly the right stills stale.
 **AI spend:** ~$0.60/Meld
+
+> **Correction (M4, implemented).** Three things moved when M4 was built:
+>
+> - **`map_shot_characters` is a job kind** (M4-D1); see §5.4.
+> - **Every generated artifact keys on a narrow *projection* of its parent, not the
+>   parent's whole `content_hash`** (M4-D2, M4-D3). A still is drawn from `image_prompt`
+>   and `camera`; a clip is read from `speech_text`, `dialogue_kind` and the speaker's
+>   `voice_id`; the casting pass sees `image_prompt`, `camera` and `speech_text`. Hashing
+>   more than that charges the user to regenerate byte-identical work — and where the
+>   surplus field is one the job itself writes, as `speaker_character_id` was, it charges
+>   them *every time, forever*. This is §4.1's rule honoured rather than bent: downstream
+>   still keys on upstream's current content, just the part of it that is upstream **of
+>   this artifact**.
+> - **A still is refused when a character in the shot has no sheet** (M4-D6), before any
+>   hold. Drawing it anyway produces the character drift §11 lists as a high-severity risk,
+>   and leaves the staleness arithmetic permanently wrong.
+>
+> M4 also made **`characters.voice_id` user-editable** (M4-D3). It has existed since M3 and
+> is already inside the character's `content_hash` and outside its visual hash, so changing a
+> voice invalidates that character's dialogue and leaves their sheet alone, with no new
+> machinery.
 
 ### M5 — Preview
 Scene spec assembly, the Remotion render service, animated-stills Preview render with
