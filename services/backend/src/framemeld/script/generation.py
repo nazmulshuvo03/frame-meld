@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
 from framemeld.models.meld import Meld, MeldStage
@@ -18,6 +18,7 @@ from framemeld.models.script import (
     Scene,
     Shot,
 )
+from framemeld.models.shots import AudioClip, AudioOwnerType
 from framemeld.providers.base import ProviderResponseError
 from framemeld.script.hashes import content_hash_for_scene, content_hash_for_shot
 
@@ -299,9 +300,28 @@ async def apply_script(
     expressed. Their edits are protected by *not regenerating* — which is
     why staleness never regenerates on its own.
     """
-    # A bulk delete; Postgres cascades to shots. synchronize_session=False
-    # because nothing in this session should still be holding the old rows,
-    # and the ORM's default strategy would issue a SELECT to find out.
+    # Audio first, by hand. `audio_clips.owner_id` is polymorphic (spec
+    # §5.3: a clip hangs from a shot or from the Meld), so it carries no
+    # foreign key and nothing cascades it. Without this, regenerating a
+    # script leaves every recording behind pointing at a shot id that no
+    # longer resolves — rows nobody can reach and nobody will clean up.
+    await db.execute(
+        delete(AudioClip)
+        .where(
+            AudioClip.owner_type == AudioOwnerType.SHOT,
+            AudioClip.owner_id.in_(
+                select(Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .where(Scene.meld_id == meld.id)
+            ),
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+    # A bulk delete; Postgres cascades to shots, and from shots to
+    # shot_images and shot_characters. synchronize_session=False because
+    # nothing in this session should still be holding the old rows, and the
+    # ORM's default strategy would issue a SELECT to find out.
     await db.execute(
         delete(Scene).where(Scene.meld_id == meld.id).execution_options(synchronize_session=False)
     )

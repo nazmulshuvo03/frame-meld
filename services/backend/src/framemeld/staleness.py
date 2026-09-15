@@ -13,7 +13,15 @@ from framemeld.cast.hashes import (
 from framemeld.models.cast import Character, CharacterImage
 from framemeld.models.meld import Meld, Story
 from framemeld.models.script import ArtifactState, Scene, Shot
+from framemeld.models.shots import AudioClip, AudioOwnerType, ShotCharacter, ShotImage
+from framemeld.providers.speech.voices import DEFAULT_VOICE_ID
 from framemeld.script.hashes import script_input_hash
+from framemeld.shots.hashes import (
+    audio_clip_input_hash,
+    shot_image_input_hash,
+    speech_hash_for_shot,
+    visual_hash_for_shot,
+)
 
 # Only these two states are recomputed. A row that is `empty` has nothing to
 # be stale about; a `generating` row is owned by a worker that is about to
@@ -27,6 +35,8 @@ class StalenessReport:
     stale_shots: int
     stale_characters: int
     stale_sheets: int
+    stale_stills: int
+    stale_audio: int
     #: How many rows this call actually moved. Zero means the API can skip
     #: telling the user anything changed.
     changed: int
@@ -69,11 +79,11 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
         await db.execute(select(Meld).where(Meld.id == meld_id, Meld.deleted_at.is_(None)))
     ).scalar_one_or_none()
     if meld is None:
-        return StalenessReport(0, 0, 0, 0, 0)
+        return StalenessReport(0, 0, 0, 0, 0, 0, 0)
 
     story = (await db.execute(select(Story).where(Story.meld_id == meld_id))).scalar_one_or_none()
     if story is None:
-        return StalenessReport(0, 0, 0, 0, 0)
+        return StalenessReport(0, 0, 0, 0, 0, 0, 0)
 
     expected = script_input_hash(story.content_hash)
 
@@ -121,6 +131,77 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
             image, character_image_input_hash(visual_hash_for_character(owner), image.kind), now
         )
 
+    # Stills are the first multi-parent node (M4-D2): each one is compared
+    # against its own shot's visual hash *and* the current content_hash of
+    # every sheet it referenced. `ref_character_image_ids` is the historical
+    # record of what was sent, so a sheet that has since been redrawn moves
+    # its content_hash and the still that used it correctly goes stale.
+    shots_by_id = {shot.id: shot for shot in shots}
+    sheet_content = {image.id: image.content_hash for image in images}
+    stills = list(
+        (
+            await db.execute(
+                select(ShotImage)
+                .join(Shot, ShotImage.shot_id == Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .where(Scene.meld_id == meld_id)
+            )
+        ).scalars()
+    )
+    # What the shot references *now*, which is not the same as what the
+    # still was drawn from: adding a character to a shot must invalidate a
+    # still that was drawn without them.
+    current_refs: dict[uuid.UUID, list[str]] = {}
+    for shot_id, image_id in (
+        await db.execute(
+            select(ShotCharacter.shot_id, CharacterImage.id)
+            .join(Character, ShotCharacter.character_id == Character.id)
+            .join(CharacterImage, CharacterImage.character_id == Character.id)
+            .where(Character.meld_id == meld_id)
+        )
+    ).all():
+        content = sheet_content.get(image_id)
+        if content:
+            current_refs.setdefault(shot_id, []).append(content)
+
+    for still in stills:
+        shot = shots_by_id.get(still.shot_id)
+        if shot is None:
+            continue
+        changed += _reconcile(
+            still,
+            shot_image_input_hash(visual_hash_for_shot(shot), current_refs.get(still.shot_id, [])),
+            now,
+        )
+
+    clips = list(
+        (
+            await db.execute(
+                select(AudioClip).where(
+                    AudioClip.owner_type == AudioOwnerType.SHOT,
+                    AudioClip.owner_id.in_(list(shots_by_id)),
+                )
+            )
+        ).scalars()
+    )
+    # The clip's own voice_id, not the speaker's current one. Both are
+    # compared: the hash covers the voice the clip was recorded in, and
+    # `_voice_now` below is what it would be recorded in today, so changing
+    # a character's voice invalidates their lines and nothing else.
+    voices = {character.id: character.voice_id or DEFAULT_VOICE_ID for character in characters}
+    for clip in clips:
+        shot = shots_by_id.get(clip.owner_id)
+        if shot is None:
+            continue
+        voice_now = (
+            DEFAULT_VOICE_ID
+            if shot.speaker_character_id is None
+            else voices.get(shot.speaker_character_id, DEFAULT_VOICE_ID)
+        )
+        changed += _reconcile(
+            clip, audio_clip_input_hash(speech_hash_for_shot(shot, voice_now), clip.kind), now
+        )
+
     if changed:
         await db.flush()
 
@@ -129,5 +210,7 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
         stale_shots=sum(1 for shot in shots if shot.state is ArtifactState.STALE),
         stale_characters=sum(1 for c in characters if c.state is ArtifactState.STALE),
         stale_sheets=sum(1 for image in images if image.state is ArtifactState.STALE),
+        stale_stills=sum(1 for still in stills if still.state is ArtifactState.STALE),
+        stale_audio=sum(1 for clip in clips if clip.state is ArtifactState.STALE),
         changed=changed,
     )

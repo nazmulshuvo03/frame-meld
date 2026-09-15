@@ -10,7 +10,12 @@ from framemeld.jobs.service import JobDispatch, ensure_job
 from framemeld.melds.service import get_meld
 from framemeld.models.job import Job, JobKind
 from framemeld.models.script import ArtifactState, Scene, Shot
-from framemeld.script.hashes import content_hash_for_scene, content_hash_for_shot, script_input_hash
+from framemeld.script.hashes import (
+    content_hash_for_scene,
+    content_hash_for_shot,
+    script_input_hash,
+)
+from framemeld.staleness import recompute_staleness
 
 
 class EmptyStory(Exception):
@@ -142,7 +147,17 @@ async def update_shot(
             value = Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         setattr(shot, name, value)
     shot.content_hash = content_hash_for_shot(shot)
+    # D4: `state` is deliberately untouched. A row the user just edited holds
+    # what the user wants, so it is not out of date. What moves is
+    # content_hash, which is what downstream artifacts read.
     shot.updated_at = now
     meld.updated_at = now
     await db.flush()
+
+    # M4-D7. Until M4 nothing depended on a shot's content, so this call was
+    # not needed and was not made. It is needed now: a still drawn from an
+    # old image_prompt, or a clip read from an old line, would otherwise go
+    # on claiming to be fresh forever. That exact omission in
+    # update_character was the first thing M3's browser pass found.
+    await recompute_staleness(db, meld_id)
     return shot
