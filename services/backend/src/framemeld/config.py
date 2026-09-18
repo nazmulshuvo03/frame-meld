@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     # the default stays `stub`.
     speech_provider: str = "stub"
     speech_model: str = "gemini-2.5-flash-preview-tts"
+    # Same shape and same default again (M5-D2). Unlike the three above,
+    # there is no paid adapter behind this one: Lyria has no free tier and
+    # this key has no billing, so an adapter written against its documented
+    # response shape could never be called even once -- and two such
+    # adapters already exist. The stub emits a real WAV.
+    music_provider: str = "stub"
+    music_model: str = "lyria-002"
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     gemini_api_key: str = ""
@@ -82,6 +89,24 @@ class Settings(BaseSettings):
     # user may write. Any deployment that reaches real users must have this
     # on with a real provider configured.
     moderation_enabled: bool = False
+
+    # Where the Remotion render service answers (spec section 3.1). Only
+    # the worker ever calls it; the api and the browser never do.
+    render_service_url: str = "http://localhost:8790"
+    # How long the worker waits for one preview render before giving up.
+    # A 30-shot preview is stills and audio, not video, so this is generous
+    # rather than tight -- but it is bounded, because a render service that
+    # has wedged must not hold an arq slot forever.
+    render_timeout_seconds: int = 600
+
+    # How the render service reaches this api. Built into signed asset URLs
+    # (M5-D1), so it must be an address the *render service* can resolve --
+    # not necessarily the one a browser uses.
+    public_api_url: str = "http://localhost:8000"
+    # Signs those URLs. No default on purpose: a signing key with a default
+    # is a signing key everybody has, and the resulting hole is silent.
+    # Generate with `python -c "import secrets; print(secrets.token_hex(32))"`.
+    asset_signing_secret: str = ""
 
     storage_backend: str = "local"
     storage_local_root: str = "./var/assets"

@@ -7,6 +7,7 @@ from framemeld.cast.router import router as cast_router
 from framemeld.config import settings
 from framemeld.credits.router import router as credits_router
 from framemeld.melds.router import router as melds_router
+from framemeld.render.router import router as render_router
 from framemeld.script.router import router as script_router
 from framemeld.shots.router import router as shots_router
 
@@ -38,6 +39,8 @@ app.include_router(script_router)
 # Same prefix again (/melds/{meld_id}); see the note above.
 app.include_router(cast_router)
 app.include_router(shots_router)
+# Same prefix again (/melds/{meld_id}); see the note above.
+app.include_router(render_router)
 
 
 @app.get("/health")

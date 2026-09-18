@@ -26,12 +26,22 @@ PRICING_VERSION = 1
 #: generate_speech: a few hundred characters of TTS, well under a tenth of
 #: a cent at Gemini's rate (providers/rates.py). Priced above zero anyway,
 #: because a free action is one a script can call thirty thousand times.
+#: generate_music: one full-length track. Lyria is ~$0.04-0.08 and
+#: ACE-Step ~$0.008 (spec sections 6 and 6.3); 24 credits is the same ~3x
+#: markup the image actions carry, taken against the dearer of the two.
+#:
+#: render_preview is deliberately absent (M5-D7). Spec 4.2 and 9 both make
+#: Preview free, because it is the approval gate that makes a $6 Final
+#: render humane -- charging for it would defeat what it is for. Its abuse
+#: control is the idempotency key: an unchanged film re-renders for
+#: nothing because it does not re-render at all.
 QUOTES: dict[JobKind, int] = {
     JobKind.GENERATE_CHARACTERS: 5,
     JobKind.GENERATE_CHARACTER_IMAGE: 12,
     JobKind.MAP_SHOT_CHARACTERS: 5,
     JobKind.GENERATE_SHOT_IMAGE: 12,
     JobKind.GENERATE_SPEECH: 2,
+    JobKind.GENERATE_MUSIC: 24,
 }
 
 

@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import select
 
 from framemeld.assets.service import store_asset
+from framemeld.assets.signing import sign_asset
 from framemeld.models.user import User
 from framemeld.providers.images.stub import solid_png
 
@@ -75,3 +76,71 @@ async def test_serving_requires_authentication(client, db):
     await client.post("/auth/logout")
 
     assert (await client.get(f"/assets/{asset.id}")).status_code == 401
+
+
+# --- signed URLs: how the render service reads a file (M5-D1) -------------
+
+
+async def test_a_signed_url_works_with_no_session(client, db):
+    """The whole point. The render service has no cookie and no database
+    (spec section 3.1), so without this a film cannot be assembled at all."""
+    await client.post(
+        "/auth/signup", json={"email": "signed@example.com", "password": "hunter2hunter2"}
+    )
+    owner = (await db.execute(select(User).where(User.email == "signed@example.com"))).scalar_one()
+    data = solid_png(6, 6, (1, 2, 3))
+    asset = await store_asset(db, user_id=owner.id, data=data, mime="image/png", ext="png")
+    await db.commit()
+
+    # `client`, not `logged_in`: signup issues no cookie, so this caller is
+    # anonymous -- which is exactly the render service's position.
+    response = await client.get(f"/assets/{asset.id}?{sign_asset(asset.id)}")
+    assert response.status_code == 200
+    assert response.content == data
+
+
+async def test_an_expired_signature_is_404_for_an_anonymous_caller(client, db):
+    await client.post(
+        "/auth/signup", json={"email": "expired@example.com", "password": "hunter2hunter2"}
+    )
+    owner = (await db.execute(select(User).where(User.email == "expired@example.com"))).scalar_one()
+    asset = await store_asset(
+        db, user_id=owner.id, data=solid_png(4, 4, (0, 0, 0)), mime="image/png", ext="png"
+    )
+    await db.commit()
+
+    response = await client.get(f"/assets/{asset.id}?{sign_asset(asset.id, ttl_seconds=-1)}")
+    # 401, not 404: a dead signature leaves the caller exactly as
+    # unauthenticated as one that sent none at all.
+    assert response.status_code == 401
+
+
+async def test_a_signature_for_one_asset_does_not_open_another(client, db):
+    await client.post(
+        "/auth/signup", json={"email": "twoassets@example.com", "password": "hunter2hunter2"}
+    )
+    owner = (
+        await db.execute(select(User).where(User.email == "twoassets@example.com"))
+    ).scalar_one()
+    mine = await store_asset(
+        db, user_id=owner.id, data=solid_png(4, 4, (1, 1, 1)), mime="image/png", ext="png"
+    )
+    theirs = await store_asset(
+        db, user_id=owner.id, data=solid_png(4, 4, (2, 2, 2)), mime="image/png", ext="png"
+    )
+    await db.commit()
+
+    response = await client.get(f"/assets/{theirs.id}?{sign_asset(mine.id)}")
+    assert response.status_code == 401
+
+
+async def test_a_bad_signature_still_lets_the_owner_through(logged_in, db):
+    """The signature is an additional way in, not a replacement. A browser
+    that somehow sent a stale one must not lose access to its own file."""
+    data = solid_png(4, 4, (7, 7, 7))
+    asset = await _asset_for_logged_in_user(db, data)
+    await db.commit()
+
+    response = await logged_in.get(f"/assets/{asset.id}?exp=1&sig=nonsense")
+    assert response.status_code == 200
+    assert response.content == data

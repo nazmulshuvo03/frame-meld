@@ -349,3 +349,55 @@ export const generateSpeech = (meldId: string, shotId: string) =>
  *  the speech adapter will actually accept — a voice the provider rejects is
  *  a failed job and a refunded credit, for a value this UI offered. */
 export const getVoices = (meldId: string) => request<string[]>(`/melds/${meldId}/voices`);
+
+// --- Film: music and the Preview render (M5) -----------------------------
+
+export type Render = {
+  id: string;
+  kind: "preview" | "final";
+  state: string;
+  /** Null until a render succeeds. */
+  asset_id: string | null;
+  /** A decimal string, like every other duration here, for the same
+   *  reason: it round-trips unchanged. */
+  duration_sec: string | null;
+  resolution: string;
+  updated_at: string;
+};
+
+export type Music = {
+  id: string;
+  state: string;
+  asset_id: string | null;
+  /** The derived brief the score was composed from. Shown, because "why
+   *  does my film sound like that" is otherwise unanswerable. */
+  text: string;
+  duration_sec: string | null;
+  credits_spent: number;
+  updated_at: string;
+};
+
+export type FilmView = {
+  shot_count: number;
+  /** How many shots have a still with bytes. A preview is refused below
+   *  parity with shot_count — a film with holes in it tells the user
+   *  nothing about the film. */
+  stills_ready: number;
+  duration_sec: number;
+  music: Music | null;
+  preview: Render | null;
+};
+
+export const getFilm = (meldId: string) => request<FilmView>(`/melds/${meldId}/film`);
+
+export const generateMusic = (meldId: string) =>
+  request<Job>(`/melds/${meldId}/film/music`, { method: "POST" });
+
+export const renderPreview = (meldId: string) =>
+  request<Job>(`/melds/${meldId}/film/preview`, {
+    method: "POST",
+    // A render takes far longer than a generation to *start*, because the
+    // API assembles the whole scene spec before it answers. The default
+    // 15 s is a timeout this one request can genuinely hit on a long film.
+    timeoutMs: 60_000,
+  });

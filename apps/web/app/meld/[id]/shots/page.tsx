@@ -181,9 +181,14 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6">
-        <Link href={`/meld/${id}/cast`} className="text-sm text-neutral-500 hover:underline">
-          ← Cast
-        </Link>
+        <div className="flex items-baseline justify-between">
+          <Link href={`/meld/${id}/cast`} className="text-sm text-neutral-500 hover:underline">
+            ← Cast
+          </Link>
+          <Link href={`/meld/${id}/film`} className="text-sm text-neutral-500 hover:underline">
+            Next up: Film →
+          </Link>
+        </div>
         <div className="mt-1 flex flex-wrap items-baseline justify-between gap-4">
           <h1 className="text-2xl font-semibold">Shots</h1>
           <div className="flex flex-wrap items-center gap-3">

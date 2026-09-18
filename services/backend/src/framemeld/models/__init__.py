@@ -13,6 +13,7 @@ from framemeld.models.cast import (
 from framemeld.models.credits import CreditKind, CreditLedger
 from framemeld.models.job import Job, JobKind, JobState
 from framemeld.models.meld import Meld, MeldStage, MeldStatus, ModerationState, Story
+from framemeld.models.render import Render, RenderKind
 from framemeld.models.script import (
     MAX_SHOT_SECONDS,
     MAX_SHOTS,
@@ -55,6 +56,8 @@ __all__ = [
     "MeldStage",
     "MeldStatus",
     "ModerationState",
+    "Render",
+    "RenderKind",
     "Scene",
     "Session",
     "Shot",

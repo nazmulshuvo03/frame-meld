@@ -1,0 +1,24 @@
+{
+  "name": "framemeld-render",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stateless Remotion render service. Takes a scene spec, returns an MP4.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.0",
+    "@remotion/renderer": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  }
+}

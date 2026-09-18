@@ -10,60 +10,53 @@ Story → Script → Cast → Shots → Film.
 
 ## Status
 
-**M4 (Shots) complete.** Every shot gets a still drawn from the character
-sheets of the people actually in it, plus an audio clip in the speaker's
-voice. An LLM pass works out who is in which shot; editing a character
-marks exactly the stills that referenced them stale, and nothing else.
-This is the first milestone with a multi-parent hash — a still depends on
-its shot *and* on every sheet it was drawn from — and the first with three
-independent provider domains, so switching image models re-draws nothing
-that was spoken and switching voices re-records nothing that was drawn.
+**M5 (Preview) complete.** A Meld whose shots are drawn can be assembled
+into a watchable draft of the film — the stills animated with a Ken Burns
+move, the narration laid over them, an optional instrumental score mixed
+underneath — and it costs nothing. This is the first milestone with a
+second runtime: a stateless Node/Remotion service that holds no database,
+no session and no knowledge of users, and reads every asset over an
+HMAC-signed URL. It is also the first artifact whose inputs are a
+*document* rather than a set of rows, which turned out to matter (see the
+M5 decision record).
 
 What's verified and how:
 
-- The backend test suite (516 tests) passes, plus a frontend suite (29
-  tests) covering the autosave hook, the API client, the quote button and
-  the shot card — see [Tests](#tests) below.
-- **The migration chain builds the schema from nothing.** All seven
+- The backend test suite (591 tests) passes, plus a frontend suite (38
+  tests) and a clean `tsc --noEmit` on the render service — see
+  [Tests](#tests) below.
+- **The migration chain builds the schema from nothing.** All eight
   migrations applied in order against an empty database, and `alembic
-  check` reports no drift between the chain and the models.
-- Money rules are enforced at the API and pinned by tests: a hold is taken
-  in the same transaction as the job row; a second click on unchanged
-  inputs is a cache hit that charges nothing; too few credits is a **402**
-  that creates no job and moves no credits; a failed generation refunds in
-  full; and exactly one settle or refund may ever close a hold, because
-  arq redelivers messages and an append-only ledger has no undo.
-- **The whole M4 flow has been driven through a real browser** against a
-  real backend and a real worker (all three providers were the stubs —
-  see Known gaps):
-  - The Shots page listed 11 shots in **film order**, and the batch button
-    read **"Draw the 11 remaining · 132 credits"** — the price of the whole
-    action on the button face, before the click.
-  - Casting the shots placed characters into frames via polling with no
-    reload, and moved the balance by exactly the quote. Shots with nobody
-    in them rendered as "nobody in frame", which is a correct answer for an
-    insert, not a missing one.
-  - Asking for a still whose character had no sheet was a **422 naming
-    that character**, with the balance unmoved.
-  - A still for a two-character shot was drawn from **two references**, and
-    two shots got two different pictures.
-  - Generating audio produced a player without a reload, **in the speaker's
-    voice**, with a real duration read off the WAV.
-  - **Editing a character's description left everything fresh and charged
-    nothing.** Editing their *appearance* and redrawing their sheet marked
-    **exactly the still that referenced them** stale — the other still
-    stayed fresh, and both kept their images.
-  - Changing a character's voice marked their clip stale, **moved no
-    still**, and left their sheet fresh.
-  - "Draw the 9 remaining" drained one job at a time to 11 stills with 11
-    distinct assets. Re-asking for an unchanged still returned `succeeded`
-    immediately and cost zero.
-  - A **real provider 429** retried three times with 2 s then 4 s backoff,
-    failed terminally, and returned the balance to exactly where it
-    started.
-- Ownership checks are enforced at the API: another user's cast,
+  check` reports no drift between the chain and the models. The `renders`
+  migration needed no enum widening at all: every job kind and audio kind
+  M5 writes was already declared a milestone or more earlier.
+- **A Preview costs nothing and takes no hold**, because it is the approval
+  gate that makes a $6 Final render humane (spec §4.2). What stops it being
+  abused is the idempotency key rather than a price: pressing Render again
+  on an unchanged film starts no work at all.
+- **The whole M5 flow has been driven end to end** against a real api, a
+  real worker and the real render service, on a fresh account, with the
+  image, speech and music providers on their stubs:
+  - Story → script → cast → sheets → casting → 6 stills → 2 speech clips,
+    every job succeeding, giving a **6-shot, 21.5-second** film.
+  - Scoring the film wrote the first `audio_clips` row with
+    `owner_type = meld` — the polymorphic owner M4 declared and never used.
+  - The preview rendered in **21 seconds** and moved the balance by
+    **0 credits**.
+  - The file is **910 KB of `video/mp4`**, and `getVideoMetadata` reports
+    **21.55 s, 1280×720, h264 + aac** — both the narration and the score
+    are in it.
+  - The render service read the stills over **10 signed asset fetches, all
+    200**, from a process with no session cookie at all.
+  - Pressing Render again with nothing changed returned `succeeded`
+    immediately and rendered nothing.
+  - Editing one shot's duration marked the preview **stale and kept its
+    file**; editing a *motion prompt* left it fresh, because the preview
+    renderer never reads that field.
+- Ownership checks are enforced at the API: another user's film, cast,
   character, or asset returns 404 (not 403), and a logged-out request
-  returns 401.
+  returns 401. A signed URL is scoped to one asset id and expires, so it
+  opens one file for one hour and nothing else.
 
 ## Layout
 
@@ -78,10 +71,13 @@ What's verified and how:
 | `services/backend/src/framemeld/shots` | shot/character casting, the multi-parent hash, the Shots API |
 | `services/backend/src/framemeld/providers/images` | `ImageProvider`, its stub, and the Gemini adapter |
 | `services/backend/src/framemeld/providers/speech` | `SpeechProvider`, the voice list, its stub, and the Gemini TTS adapter |
-| `apps/web` | Next.js frontend — signup/login, Meld list, story editor, Script page, Cast page, Shots page |
+| `services/backend/src/framemeld/providers/music` | `MusicProvider` and its stub. No real adapter yet (M5-D2) |
+| `services/backend/src/framemeld/render` | scene spec assembly, the render hashes, the HTTP client for the render service, the Film API |
+| `services/render` | The Remotion render service: a scene spec in, an MP4 out. No database, no auth, no knowledge of users (spec §3.1) |
+| `apps/web` | Next.js frontend — signup/login, Meld list, story editor, Script page, Cast page, Shots page, Film page |
 | `docs/superpowers/specs` | Design spec |
 | `docs/superpowers/plans` | Per-milestone implementation plans |
-| `docs/superpowers/m1-decisions.md` … `m4-decisions.md` | Execution ledgers — the *why* behind non-obvious code |
+| `docs/superpowers/m1-decisions.md` … `m5-decisions.md` | Execution ledgers — the *why* behind non-obvious code |
 
 ## Running locally
 
@@ -107,11 +103,23 @@ conda run --no-capture-output -n framemeld uvicorn framemeld.api_main:app --relo
 cd services/backend
 conda run --no-capture-output -n framemeld arq framemeld.worker.WorkerSettings
 
-# in a third terminal
+# in a third terminal — the Remotion render service, required from M5 on for previews
+cd services/render && npm install && npm start
+
+# in a fourth terminal
 cd apps/web && npm install && npm run dev
 ```
 
 Then open <http://localhost:3000>. API docs are at <http://localhost:8000/docs>.
+
+**Set `ASSET_SIGNING_SECRET` before rendering anything.** It has no default (M5-D1), and
+without it every preview fails at the point the worker tries to build a URL the render
+service can fetch.
+
+**The render service downloads a ~113 MB headless Chrome on first start**, and says so. It
+answers `/health` while that is happening, so "up" and "ready to render" are not the same
+thing for the first minute or two. It listens on **8790**, not Remotion's usual port, because
+8787 was already taken on the development machine — see `m5-decisions.md`.
 
 **Only ever run one of each process.** `config.py` caches settings with `@lru_cache`, so a
 server or worker left running from before an `.env` edit keeps the old values and will
@@ -122,13 +130,17 @@ wraps the process, so the child survives. Kill `arq.exe` and `uvicorn.exe` by na
 confirm exactly one of each. A job's `cost_usd` is the cheapest way to tell which provider
 actually ran: zero means the stub.
 
-`alembic upgrade head` applies seven migrations, in order: `7d9b40163474` (users and
+`alembic upgrade head` applies eight migrations, in order: `7d9b40163474` (users and
 sessions), `8cea41eb5150` (melds and stories), `4440a9739020` (renames
 `stories.input_hash` to `content_hash`), `cd586f9b74e2` (scenes, shots, jobs),
 `63b07598bddb` (credits, cast, assets, `jobs.cost_usd`), `abc2ff5e822a`
 (`melds.moderation_hash`), `77f9548e4df1` (`shot_characters`, `shot_images`, `audio_clips`,
 and a hand-written widening of the `job_kind` CHECK — autogenerate does not diff a CHECK
-body, so a new job kind produces no migration at all unless you write it).
+body, so a new job kind produces no migration at all unless you write it), and
+`ca0a9cfdfb6b` (`renders`). That last one needed **no** enum work: `generate_music`,
+`render_preview`, `AudioKind.MUSIC` and `AudioOwnerType.MELD` were all declared in their
+CHECK constraints a milestone or more before anything wrote them, which is exactly the cost
+`77f9548e4df1` had to pay for a value that was not.
 
 ### Granting credits
 
@@ -156,6 +168,17 @@ It refuses a negative amount rather than doubling as a clawback.
 - `SPEECH_PROVIDER` / `SPEECH_MODEL` — `stub` (default) or `gemini`. Unlike images,
   Gemini TTS has a free tier — but no call has ever succeeded from this account, so the
   adapter is unverified (M4-D9). Defaults to `gemini-2.5-flash-preview-tts`.
+- `MUSIC_PROVIDER` / `MUSIC_MODEL` — `stub`, and `stub` is the only name that resolves
+  (M5-D2). No real music adapter exists; the registry raises on anything else rather than
+  silently scoring a paying user's film with a sine chord.
+- `ASSET_SIGNING_SECRET` — **required before any render will work.** It signs the asset URLs
+  the render service fetches (M5-D1). There is no default, deliberately: a signing key with
+  a default is a signing key everybody has. Generate one with
+  `python -c "import secrets; print(secrets.token_hex(32))"`.
+- `RENDER_SERVICE_URL` / `PUBLIC_API_URL` / `RENDER_TIMEOUT_SECONDS` — where the render
+  service answers, how it reaches this api, and how long the worker waits for one film.
+  `PUBLIC_API_URL` is baked into signed URLs, so it must be an address the *render service*
+  can resolve — not necessarily the one a browser uses.
 - `STORAGE_BACKEND` / `STORAGE_LOCAL_ROOT` — `local` (default), writing under `./var/assets`,
   which is gitignored.
 - `MODERATION_ENABLED` — `false` by default, because the stub LLM cannot classify anything.
@@ -173,7 +196,7 @@ conda run --no-capture-output -n framemeld ruff check src tests
 conda run --no-capture-output -n framemeld ruff format --check src tests
 ```
 
-`pytest` passes: **516 passed, 4 skipped**. All four skips are opt-in live-API calls:
+`pytest` passes: **591 passed, 4 skipped**. All four skips are opt-in live-API calls:
 `FRAMEMELD_LIVE_LLM=1` for `test_providers_openrouter.py` / `test_providers_gemini.py`,
 `FRAMEMELD_LIVE_IMAGE=1` for `test_providers_image_gemini.py` (a separate flag, because that
 one spends money), and `FRAMEMELD_LIVE_SPEECH=1` for `test_providers_speech_gemini.py`.
@@ -203,11 +226,20 @@ npm test
 npx tsc --noEmit && npm run lint && npm run build
 ```
 
-`npm test` (Vitest) passes: **29 passed** — 11 on `useAutosave`, 4 on the API client's
-timeout and error handling, 5 on `QuoteButton`'s affordability rules, and 9 on
-`ShotMediaCard`. `npm run build` compiles and prerenders every static route cleanly;
-`/meld/[id]`, `/meld/[id]/script`, `/meld/[id]/cast` and `/meld/[id]/shots` are
-server-rendered on demand.
+`npm test` (Vitest) passes: **38 passed** — 11 on `useAutosave`, 4 on the API client's
+timeout and error handling, 5 on `QuoteButton`'s affordability rules, 9 on `ShotMediaCard`,
+and 9 on the Film page. `npm run build` compiles and prerenders every static route cleanly;
+`/meld/[id]` and its `script`, `cast`, `shots` and `film` pages are server-rendered on
+demand.
+
+The render service has no test suite of its own — its one job is to turn a scene spec into
+an MP4, and the only meaningful check is whether the file plays:
+
+```bash
+cd services/render
+npm install
+npx tsc --noEmit
+```
 
 ## Architecture notes
 
@@ -247,6 +279,29 @@ silently ships a film where a face changes halfway through. Sorted, because the 
 sheets came back in is a query-plan detail, and a hash that depended on it would charge a
 user to redraw an identical picture the first time Postgres changed its mind.
 
+**The render's inputs are a document, and that changes how it is hashed.** Every other
+generated row keys on a hash of upstream *rows*. A render keys on the scene spec — and the
+scene spec contains signed URLs, and a signature contains an expiry. Hash the document as
+sent and every render is unique, so the idempotency key never matches, the cache never hits,
+and a free button whose only abuse control is "an unchanged film starts no work" starts work
+every time. `SceneSpec` therefore produces two documents from one walk: `to_request()`, with
+signed URLs, and `to_hash_payload()`, with each artifact's `content_hash` in the same
+position. They are written next to each other on purpose — the failure being guarded against
+is the two drifting into describing different films.
+
+**The render service knows nothing.** No database, no session, no users, no credits (spec
+§3.1). It receives one versioned JSON document containing a signed URL for every asset it
+needs and returns an MP4. That is the whole cross-language contract, and it is why the second
+runtime costs so little: `services/render/src/types.ts` is the Node half of
+`framemeld/render/spec.py`, kept in step by hand, because a contract with twelve fields does
+not need a code generator.
+
+**Signed asset URLs are twenty lines of HMAC, not S3.** The signature covers the asset id and
+an expiry, so it opens one file for one hour and cannot be moved to another. The asset route
+accepts a signature *or* a session; the signature path is checked first and is sufficient on
+its own, which is why `CurrentUser` is not a dependency on that route — a dependency raises
+401 before any handler code could check a signature.
+
 **Credits are integers and the balance is never stored.** It is `SUM(delta)` over the
 append-only `credit_ledger`, read inside a transaction holding a `FOR UPDATE` lock on the
 user's row — because SUM-then-INSERT is a time-of-check/time-of-use race that lets two
@@ -281,14 +336,18 @@ them for oversights:
   with a user's credits.** Nothing in M3 reaches it — `IMAGE_PROVIDER` defaults to `stub`.
 - **No Stripe.** Credits are granted, never bought (spec §10). `grant_credits` is the only
   top-up path.
-- **`<img>` asset loading depends on same-site cookies.** The frontend renders sheets with
-  a plain `<img src="{API}/assets/{id}">`, which relies on the session cookie being sent
-  with a subresource request. That works in development because `localhost:3000` and
-  `localhost:8000` are same-site (SameSite ignores the port). **The day web and api live on
-  different domains, every image will 401.** Signed URLs are the fix, and M5's render
-  service needs them anyway — do not "fix" this early by loosening the cookie.
-- **Storage is local disk.** Nothing outside the api can read an asset, which is exactly
-  what M5's render service will need (M3-D1).
+- **`<img>` asset loading still depends on same-site cookies.** The frontend renders
+  sheets, stills and previews with a plain `<img>`/`<video src="{API}/assets/{id}">`, which
+  relies on the session cookie being sent with a subresource request. That works in
+  development because `localhost:3000` and `localhost:8000` are same-site (SameSite ignores
+  the port). **The day web and api live on different domains, every image will 401.** M5
+  built the signing that fixes this — the route accepts a signature *or* a session — but the
+  frontend does not use it: it would mean the API handing the browser signed URLs for every
+  thumbnail, which is a change to several list endpoints for a problem that does not exist
+  yet. Do not "fix" it by loosening the cookie.
+- **Storage is local disk** (M5-D1). Signed URLs, not S3, are what let the render service
+  read a file, so R2 is still deferred — and the `Storage` protocol is untouched, so adding
+  it is a two-file change whenever egress or multi-host deployment demands one.
 - **Moderation fails open and is off by default.** It is a gate in front of a paid provider,
   not a security boundary: a provider outage that stopped everyone generating would be a
   bigger outage than the window it closes.
@@ -309,8 +368,9 @@ them for oversights:
   pictures. `settle`'s variable-units path is still unexercised and belongs to M6's
   resumable render.
 - **`shot_images.seed` is declared and never set** — no configured provider accepts one —
-  and `audio_clips`' `music`/`sfx` kinds and `meld` owner type are declared and never
-  produced. M5's music is the first writer.
+  and `audio_clips`' `sfx` kind, `RenderKind.FINAL`, and `renders`' `params` and
+  `credits_spent` columns are declared and never written. M5 wrote the first `music` clip
+  and the first `meld`-owned one, which M4 declared for exactly that.
 - **Dark mode is unstyled.** Every page uses fixed `text-neutral-*` colours with no
   dark-mode variants, so under a dark OS theme some text renders dark-on-dark. This affects
   every page equally and is a whole-app theming decision, not a bug in any one of them.
@@ -324,7 +384,34 @@ them for oversights:
   `http://localhost`; must become `True` behind TLS before any public deploy.
 - **No job cancellation.** A queued generation runs to completion; stopping the worker
   leaves the button on "Queued…" indefinitely — a known limitation, not a hang.
-- Also absent, arriving in later milestones: speech and shot images (M4), the Remotion
-  render service (M5), email verification and password reset (post-M6).
+- **No real music model exists** (M5-D2). `MUSIC_PROVIDER=stub` is the only name the
+  registry resolves. The stub emits a real WAV — a four-note chord with a fade — so every
+  path downstream of it is exercised, but no film has ever been scored by a model. Lyria is
+  paid and this key has no billing; ACE-Step is the commercially-safe self-hosted option
+  (spec §6).
+- **The Ken Burns numbers have never been judged against a real image.** Every frame
+  rendered so far came from `solid_png`, a flat colour. The arithmetic is tested and the
+  transform demonstrably applies, but whether a slow push into a real generated still reads
+  as cinematic or as a wobble is a question only a real still answers. Watch one preview and
+  adjust `_MOTION` in `render/spec.py` the day an image key works.
+- **No preview has been rendered at the product's stated size.** The end-to-end pass was 6
+  shots and 21.5 seconds; spec §1 says 10–30 shots and 1–3 minutes. `job_timeout` is
+  `RENDER_TIMEOUT_SECONDS + 120` on the extrapolation that 30 shots stay well inside ten
+  minutes.
+- **The composition does not branch on `clip_url` yet.** The field is in the contract on
+  both sides and the assembler writes `null`, but nothing in M5 can produce a clip, so the
+  branch that would read one is not there — an unexercised path inside a renderer is the
+  worst place to have one, because a wrong film still renders. M6 adds a conditional.
+- **No render progress reaches the user.** The render service tracks a progress fraction and
+  the worker reads it only to decide whether to keep waiting; the job row has nowhere to put
+  it, so the button says "Assembling…" until the film appears. Honest at 21 seconds, not at
+  M6's minutes.
+- **No orphan sweep for render temp files.** The render service forgets an index entry 30
+  minutes after it finishes and loses the lot on restart, but a file whose worker died
+  between "done" and "downloaded" stays on disk.
+- Also absent, arriving in later milestones: image-to-video clips and the Final render (M6),
+  email verification and password reset (post-M6).
 
-There is no deployment story yet — M3 has no deployment step.
+There is no deployment story yet. M5 adds a second runtime to deploy, which makes that a
+real question rather than a deferred one: the render service needs Chrome, a writable
+temp directory, and network access to the api's `PUBLIC_API_URL`.

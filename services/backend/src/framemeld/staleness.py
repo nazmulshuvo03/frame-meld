@@ -12,9 +12,22 @@ from framemeld.cast.hashes import (
 )
 from framemeld.models.cast import Character, CharacterImage
 from framemeld.models.meld import Meld, Story
+from framemeld.models.render import Render
 from framemeld.models.script import ArtifactState, Scene, Shot
-from framemeld.models.shots import AudioClip, AudioOwnerType, ShotCharacter, ShotImage
+from framemeld.models.shots import (
+    AudioClip,
+    AudioKind,
+    AudioOwnerType,
+    ShotCharacter,
+    ShotImage,
+)
 from framemeld.providers.speech.voices import DEFAULT_VOICE_ID
+from framemeld.render.hashes import (
+    music_clip_input_hash,
+    music_hash_for_meld,
+    music_prompt,
+    render_input_hash,
+)
 from framemeld.script.hashes import script_input_hash
 from framemeld.shots.hashes import (
     audio_clip_input_hash,
@@ -37,6 +50,11 @@ class StalenessReport:
     stale_sheets: int
     stale_stills: int
     stale_audio: int
+    #: The Meld's one score, and its one preview. Counted rather than
+    #: flagged as booleans so a caller reads every field of this report
+    #: the same way.
+    stale_music: int
+    stale_renders: int
     #: How many rows this call actually moved. Zero means the API can skip
     #: telling the user anything changed.
     changed: int
@@ -79,11 +97,11 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
         await db.execute(select(Meld).where(Meld.id == meld_id, Meld.deleted_at.is_(None)))
     ).scalar_one_or_none()
     if meld is None:
-        return StalenessReport(0, 0, 0, 0, 0, 0, 0)
+        return StalenessReport(0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     story = (await db.execute(select(Story).where(Story.meld_id == meld_id))).scalar_one_or_none()
     if story is None:
-        return StalenessReport(0, 0, 0, 0, 0, 0, 0)
+        return StalenessReport(0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     expected = script_input_hash(story.content_hash)
 
@@ -202,6 +220,59 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
             clip, audio_clip_input_hash(speech_hash_for_shot(shot, voice_now), clip.kind), now
         )
 
+    # The score keys on the Meld's own title, style and scene headings, and
+    # on the film's length (M5-D3). It deliberately does not key on the
+    # stills or the spoken lines, so redrawing a face never re-scores a
+    # film -- but re-heading a scene, or changing a shot's duration, does.
+    music = (
+        (
+            await db.execute(
+                select(AudioClip).where(
+                    AudioClip.owner_type == AudioOwnerType.MELD,
+                    AudioClip.owner_id == meld_id,
+                    AudioClip.kind == AudioKind.MUSIC,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if music:
+        ordered_scenes = sorted(scenes, key=lambda scene: scene.order_index)
+        film_seconds = float(sum(shot.duration_sec for shot in shots))
+        expected_music = music_clip_input_hash(
+            music_hash_for_meld(music_prompt(meld, ordered_scenes), film_seconds)
+        )
+        for track in music:
+            changed += _reconcile(track, expected_music, now)
+
+    # The render is the last node in spec 4.1's graph and the only one with
+    # every other node upstream of it. It is reconciled against the spec
+    # that would be assembled right now -- which is why build_scene_spec
+    # lives in the render service and is imported here rather than
+    # reimplemented: two answers to "what film is this" is one answer too
+    # many.
+    renders = list((await db.execute(select(Render).where(Render.meld_id == meld_id))).scalars())
+    if renders:
+        # Imported here rather than at module scope: render.service imports
+        # melds.service, which would close a cycle back through this module.
+        from framemeld.render.service import MissingStills, NothingToRender, build_scene_spec
+
+        for render in renders:
+            try:
+                spec = await build_scene_spec(db, meld_id, render.kind)
+            except (MissingStills, NothingToRender):
+                # A film that can no longer be assembled at all -- a still
+                # was regenerated and is mid-flight, or the script went
+                # away. Stale rather than failed: the file it produced is
+                # still watchable and still that user's, it just no longer
+                # describes the Meld.
+                changed += _reconcile(render, "", now)
+                continue
+            changed += _reconcile(
+                render, render_input_hash(spec.to_hash_payload(), render.kind), now
+            )
+
     if changed:
         await db.flush()
 
@@ -212,5 +283,7 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
         stale_sheets=sum(1 for image in images if image.state is ArtifactState.STALE),
         stale_stills=sum(1 for still in stills if still.state is ArtifactState.STALE),
         stale_audio=sum(1 for clip in clips if clip.state is ArtifactState.STALE),
+        stale_music=sum(1 for track in music if track.state is ArtifactState.STALE),
+        stale_renders=sum(1 for r in renders if r.state is ArtifactState.STALE),
         changed=changed,
     )

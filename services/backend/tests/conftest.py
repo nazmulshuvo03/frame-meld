@@ -26,6 +26,8 @@ def _stub_providers_by_default(monkeypatch):
     with its own monkeypatch, which simply wins for that test's duration."""
     monkeypatch.setattr(settings, "llm_provider", "stub")
     monkeypatch.setattr(settings, "image_provider", "stub")
+    monkeypatch.setattr(settings, "speech_provider", "stub")
+    monkeypatch.setattr(settings, "music_provider", "stub")
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +36,15 @@ def _isolated_storage(tmp_path, monkeypatch):
     leaves files in the repo and two tests can never see each other's
     assets."""
     monkeypatch.setattr(settings, "storage_local_root", str(tmp_path / "assets"))
+
+
+@pytest.fixture(autouse=True)
+def _signing_secret(monkeypatch):
+    """A signing key for every test. ASSET_SIGNING_SECRET has no default
+    (M5-D1), which is correct in production and would otherwise mean
+    every signed-URL path in the suite exercised the not-configured
+    branch instead of the real one."""
+    monkeypatch.setattr(settings, "asset_signing_secret", "test-secret-not-a-real-key")
 
 
 @pytest.fixture(scope="session")

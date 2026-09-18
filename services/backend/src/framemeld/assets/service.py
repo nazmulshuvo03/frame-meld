@@ -95,3 +95,15 @@ async def get_asset(db: DbSession, user_id: uuid.UUID, asset_id: uuid.UUID) -> A
     return (
         await db.execute(select(Asset).where(Asset.id == asset_id, Asset.user_id == user_id))
     ).scalar_one_or_none()
+
+
+async def get_asset_unscoped(db: DbSession, asset_id: uuid.UUID) -> Asset | None:
+    """An asset by id alone, with no ownership check.
+
+    The one caller is the signed-URL path in the router, where the
+    signature has already proved the bearer was given this exact asset id
+    by this system (M5-D1) -- there is no user in hand to scope by. Kept
+    separate from get_asset above, and named so that reaching for it by
+    accident reads as the mistake it would be.
+    """
+    return (await db.execute(select(Asset).where(Asset.id == asset_id))).scalar_one_or_none()

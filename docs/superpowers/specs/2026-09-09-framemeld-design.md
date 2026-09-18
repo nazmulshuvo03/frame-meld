@@ -86,6 +86,7 @@ nothing.
   "width": 1920,
   "height": 1080,
   "music_url": "https://.../music.mp3",
+  "music_gain_db": -18.0,
   "shots": [
     {
       "id": "shot_01",
@@ -104,6 +105,17 @@ nothing.
 
 - `kind: "preview"` → `still_url` + `motion` are used, `clip_url` is null.
 - `kind: "final"` → `clip_url` is used, `motion` is ignored.
+
+> **Correction (M5, implemented).** `music_gain_db` was added above: the score is one track
+> across the whole film and has to sit under the narration, so how far under it sits is part
+> of the contract rather than a number buried in the composition (M5-D12).
+>
+> The `kind: "final"` line describes M6. The composition M5 shipped does **not** branch on
+> `clip_url` yet — nothing in M5 can produce one, so the branch could never run and could
+> never be tested, and an unexercised path inside the renderer is the worst place to have one
+> (the M5 decision record explains why this narrows M5-D11). Both halves of the contract carry
+> the field, and the assembler writes `clip_url: null`, so M6 adds a conditional and nothing
+> else.
 
 The two render modes share one spec shape and one Remotion composition, differing only in
 whether a shot's visual source is a still or a clip. This is what makes Preview cheap to
@@ -448,7 +460,7 @@ billing) and a Gemini API key with **$10/month in Google Cloud credit** attached
 | Script, characters, moderation (`LLMProvider`) | **Gemini Flash-Lite** (`gemini-flash-lite-latest`) | Yes, rate-limited | New default for `LLM_PROVIDER`; OpenRouter's adapter is kept and still selectable, unchanged |
 | Speech (`SpeechProvider`) | Gemini native TTS (`gemini-2.5-flash-preview-tts`) | Yes, rate-limited | **Adapter built (M4)**, never successfully called — `SPEECH_PROVIDER` defaults to `stub` (M4-D9) |
 | Character sheets / shot stills (`ImageProvider`) | `gemini-2.5-flash-image` | **No** — paid, ~$0.04/image | **Adapter built (M3)**, never successfully called — no billing on the key's project. `IMAGE_PROVIDER` defaults to `stub` |
-| Music (`MusicProvider`) | Lyria (clip or full-length) | **No** — paid, ~$0.04–0.08/track | Not built yet — arrives with M5 |
+| Music (`MusicProvider`) | Lyria (clip or full-length) | **No** — paid, ~$0.04–0.08/track | **Not built (M5-D2)** — the protocol and a stub landed with M5; no Lyria adapter exists, because this key has no billing and two never-called paid adapters is already two |
 | Image-to-video (`VideoProvider`) | Veo 3.1 Lite, 720p | **No** — paid, $0.05/sec | Not built yet — arrives with M6. By far the dominant cost: ≈150s per 30-shot film ≈ $7.50, so the $10 credit funds roughly one full test film a month |
 
 **Why Gemini and not something else, for now:** the LLM swap is genuinely free and
@@ -594,6 +606,30 @@ Scene spec assembly, the Remotion render service, animated-stills Preview render
 full audio and music.
 **Done when:** a user watches a complete, watchable draft of their film for free.
 **AI spend:** ~$0
+
+> **Correction (M5, implemented).** Four things moved when M5 was built:
+>
+> - **Object storage is still local disk, and the render service reads assets over
+>   HMAC-signed URLs** (M5-D1). M3-D1 deferred S3/R2 "until something outside the api needs
+>   to read a file, which is M5's render service". That moment arrived, and R2 was still not
+>   the answer to it: what the render service needs is a URL it can GET without a cookie, and
+>   that is twenty lines of HMAC over the route that already exists — not an account, a set
+>   of credentials and an egress bill. The `Storage` protocol is untouched, so R2 remains an
+>   independent later swap rather than a prerequisite for watching a film.
+> - **The Preview render takes no hold and has no quote** (M5-D7). §4.2 and this section both
+>   say Preview is free, and it is free for a reason: it is the approval gate that makes a $6
+>   Final render humane. What stops a script pressing the button endlessly is the idempotency
+>   key — an unchanged film starts no work at all — rather than a price.
+> - **Music is a stub, not a model** (M5-D2). §6.3's Lyria row is corrected in place.
+> - **A Preview is refused while any shot has no finished still** (M5-D4), before a job row
+>   exists. Same shape as M4-D6: a film with holes in it is not the deliverable, and the only
+>   repair is to notice, fix and render again.
+>
+> Two things §5.4 and §5.3 declared ahead were reached for the first time and needed **no
+> migration at all**: `generate_music` and `render_preview` were already in `job_kind`'s
+> CHECK from M2, and `audio_clips`' `music` kind and `meld` owner type were already in theirs
+> from M4-D4. That is the contrast with M4's `map_shot_characters`, which was not on §5.4's
+> list and cost a hand-written drop-and-recreate.
 
 ### M6 — Film
 Wan 2.2 clip generation per shot (still → clip), Final render assembling clips + audio,
