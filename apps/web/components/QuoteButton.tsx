@@ -7,6 +7,7 @@ export function QuoteButton({
   busyLabel,
   label,
   onClick,
+  disabled = false,
 }: {
   credits: number;
   balance: number | null;
@@ -14,6 +15,11 @@ export function QuoteButton({
   busyLabel: string;
   label: string;
   onClick: () => void;
+  /** Not allowed yet, as opposed to `busy`, which is "already working".
+   *  The two look the same to a pointer and read very differently: a
+   *  button that says "Queued…" when nothing is queued is a lie about
+   *  what the app is doing, and the user cannot tell what to fix. */
+  disabled?: boolean;
 }) {
   // Unknown balance is not the same as an insufficient one: the balance
   // request may simply not have landed yet, and disabling the button on a
@@ -24,7 +30,7 @@ export function QuoteButton({
     <div className="flex flex-col items-end gap-1">
       <button
         onClick={onClick}
-        disabled={busy || !affordable}
+        disabled={busy || disabled || !affordable}
         className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
       >
         {busy ? busyLabel : `${label} · ${credits} credits`}

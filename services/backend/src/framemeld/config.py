@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     # adapters already exist. The stub emits a real WAV.
     music_provider: str = "stub"
     music_model: str = "lyria-002"
+    # Same shape and same default again (M6-D9), and the same reason as
+    # MUSIC_PROVIDER: no paid adapter is written, because none could be
+    # called. Spec section 6 names Wan 2.2 via a hosted API for production
+    # and section 6.3 names Veo 3.1 Lite for local development; both are
+    # billed per second, this key has no billing, and the stub encodes a
+    # real MP4 so every path downstream of the model is exercised.
+    video_provider: str = "stub"
+    video_model: str = "wan-2.2-i2v"
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     gemini_api_key: str = ""

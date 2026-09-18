@@ -29,19 +29,21 @@ from framemeld.models.job import Job, JobState
 from framemeld.models.meld import Meld, Story
 from framemeld.models.render import Render, RenderKind
 from framemeld.models.script import ArtifactState, Shot
-from framemeld.models.shots import AudioClip, ShotImage
+from framemeld.models.shots import AudioClip, ShotClip, ShotImage
 from framemeld.providers.base import ProviderError, ProviderResponseError
 from framemeld.providers.images.registry import get_image_provider
 from framemeld.providers.music.registry import get_music_provider
 from framemeld.providers.registry import get_llm_provider
 from framemeld.providers.speech.registry import get_speech_provider
 from framemeld.providers.speech.wav import WAV_MIME
+from framemeld.providers.video.registry import get_video_provider
 from framemeld.render.client import get_render_client
 from framemeld.render.hashes import (
     content_hash_for_render,
     render_input_hash,
 )
 from framemeld.render.service import (
+    MissingClips,
     MissingStills,
     NothingToRender,
     build_scene_spec,
@@ -61,9 +63,11 @@ from framemeld.shots.generation import (
     still_prompt,
 )
 from framemeld.shots.hashes import (
+    CLIP_PARAMS,
     SPEECH_PARAMS,
     STILL_PARAMS,
     content_hash_for_audio_clip,
+    content_hash_for_shot_clip,
     content_hash_for_shot_image,
 )
 from framemeld.staleness import recompute_staleness
@@ -785,8 +789,8 @@ async def generate_music(ctx: dict[str, Any], job_id: str) -> str:
     return outcome.state.value
 
 
-async def run_render_preview(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
-    """Assemble one Meld into a watchable draft (spec section 4.2).
+async def _run_render(db: DbSession, job_id: uuid.UUID, kind: RenderKind) -> JobOutcome:
+    """Assemble one Meld into a film (spec section 4.2).
 
     The scene spec is rebuilt here rather than read back off the render
     row, because the row stores the hash payload -- content hashes, no
@@ -794,8 +798,8 @@ async def run_render_preview(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
     rebuild is then checked against the key the job was queued under: a
     film the user has edited since is a *different* film, and rendering it
     under the old key would leave a render claiming to be something it is
-    not. No money is involved (M5-D7), so the honest answer is to say so
-    and let them press the button again.
+    not. A Preview involves no money (M5-D7) and a Final refunds in full,
+    so the honest answer is to say so and let them press the button again.
     """
     job = await mark_running(db, job_id)
     if job is None:
@@ -809,39 +813,44 @@ async def run_render_preview(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
     meld = (await db.execute(select(Meld).where(Meld.id == job.meld_id))).scalar_one_or_none()
     if render is None or meld is None:
         await mark_failed(db, job, "This film no longer exists.")
+        await _close_hold(db, job, succeeded=False)
         return JobOutcome(JobState.FAILED, retryable=False)
 
     try:
-        spec = await build_scene_spec(db, job.meld_id, RenderKind.PREVIEW)
-    except (MissingStills, NothingToRender) as exc:
+        spec = await build_scene_spec(db, job.meld_id, kind)
+    except (MissingClips, MissingStills, NothingToRender) as exc:
         render.state = ArtifactState.FAILED
         render.updated_at = datetime.now(UTC)
         await mark_failed(db, job, exc.reason)
+        await _close_hold(db, job, succeeded=False)
         return JobOutcome(JobState.FAILED, retryable=False)
 
-    if render_input_hash(spec.to_hash_payload(), RenderKind.PREVIEW) != job.input_hash:
+    if render_input_hash(spec.to_hash_payload(), kind) != job.input_hash:
         render.state = ArtifactState.STALE
         render.updated_at = datetime.now(UTC)
         await mark_failed(db, job, "The film changed while it was rendering. Render it again.")
+        await _close_hold(db, job, succeeded=False)
         return JobOutcome(JobState.FAILED, retryable=False)
 
     client = get_render_client()
     try:
         video = await client.render(spec.to_request())
     except ProviderError as exc:
-        logger.warning("render_preview failed for job %s: %s", job.id, exc)
+        logger.warning("%s failed for job %s: %s", job.kind.value, job.id, exc)
         if exc.retryable and job.attempts < MAX_ATTEMPTS:
             await mark_for_retry(db, job, str(exc))
             return JobOutcome(JobState.QUEUED, retryable=True)
         render.state = ArtifactState.FAILED
         render.updated_at = datetime.now(UTC)
         await mark_failed(db, job, str(exc))
+        await _close_hold(db, job, succeeded=False)
         return JobOutcome(JobState.FAILED, retryable=False)
     except Exception:
-        logger.exception("render_preview crashed for job %s", job.id)
+        logger.exception("%s crashed for job %s", job.kind.value, job.id)
         render.state = ArtifactState.FAILED
         render.updated_at = datetime.now(UTC)
         await mark_failed(db, job, "Assembling the film failed unexpectedly. Try again.")
+        await _close_hold(db, job, succeeded=False)
         return JobOutcome(JobState.FAILED, retryable=False)
 
     asset = await store_asset(db, user_id=meld.user_id, data=video, mime=_VIDEO_MIME, ext="mp4")
@@ -854,19 +863,156 @@ async def run_render_preview(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
     render.resolution = spec.resolution
     render.state = ArtifactState.FRESH
     render.provider = "remotion"
-    render.model = "preview"
+    render.model = kind.value
+    render.credits_spent = job.credits_held
     render.updated_at = datetime.now(UTC)
 
-    # No _close_hold: a Preview takes no hold at all (M5-D7), so there is
-    # nothing to settle and a call here would be a no-op that read as one.
+    # A Preview holds nothing (M5-D7), so this is a no-op for it -- called
+    # anyway rather than branched around, so "every terminal job closes its
+    # hold" stays one greppable line.
+    await _close_hold(db, job, succeeded=True)
     await mark_succeeded(db, job)
     return JobOutcome(JobState.SUCCEEDED, retryable=False)
+
+
+async def run_render_preview(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
+    return await _run_render(db, job_id, RenderKind.PREVIEW)
+
+
+async def run_render_final(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
+    return await _run_render(db, job_id, RenderKind.FINAL)
 
 
 async def render_preview(ctx: dict[str, Any], job_id: str) -> str:
     """The arq task. Same shape as the rest."""
     async with SessionLocal() as db:
         outcome = await run_render_preview(db, uuid.UUID(job_id))
+        attempts = (
+            await db.execute(select(Job.attempts).where(Job.id == uuid.UUID(job_id)))
+        ).scalar_one_or_none()
+        await db.commit()
+
+    if outcome.retryable:
+        raise Retry(defer=2 ** (attempts or 1))
+    return outcome.state.value
+
+
+async def run_generate_shot_clip(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
+    """Animate one approved still into a clip (M6).
+
+    The expensive one: at spec section 7's prices this single call is more
+    than everything else in a film put together, which is why the still it
+    reads comes off the *clip row* and not off the shot. The user can
+    redraw a still while this sits in the queue, and a job that quietly
+    animated a different picture would charge 80 credits for something
+    nobody approved (M4's rule, at twenty times the stake).
+    """
+    job = await mark_running(db, job_id)
+    if job is None:
+        existing = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
+        state = JobState.CANCELLED if existing is None else existing.state
+        return JobOutcome(state, retryable=False)
+
+    clip = (
+        await db.execute(select(ShotClip).where(ShotClip.id == job.target_id))
+    ).scalar_one_or_none()
+    still = (
+        None
+        if clip is None or clip.source_image_id is None
+        else (
+            await db.execute(select(ShotImage).where(ShotImage.id == clip.source_image_id))
+        ).scalar_one_or_none()
+    )
+    meld = (await db.execute(select(Meld).where(Meld.id == job.meld_id))).scalar_one_or_none()
+    if clip is None or still is None or meld is None:
+        await mark_failed(db, job, "This shot no longer exists.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    provider = get_video_provider()
+    try:
+        asset = (
+            None
+            if still.asset_id is None
+            else (
+                await db.execute(select(Asset).where(Asset.id == still.asset_id))
+            ).scalar_one_or_none()
+        )
+        if asset is None:
+            raise ProviderResponseError("The still this clip is made from has gone. Try again.")
+        try:
+            image = await get_storage().get(key=asset.storage_key)
+        except FileNotFoundError as exc:
+            raise ProviderResponseError(
+                "The still this clip is made from could not be read. Try again."
+            ) from exc
+
+        result = await provider.animate(
+            image=image,
+            # From the row, like the image: what the hold was priced against.
+            motion_prompt=str(clip.params.get("motion_prompt", "")),
+            duration_sec=float(clip.duration_sec or 0),
+            params=clip.params,
+        )
+        if not result.bytes_:
+            raise ProviderResponseError("The video model returned no clip.")
+    except ProviderError as exc:
+        logger.warning("generate_shot_clip failed for job %s: %s", job.id, exc)
+        if exc.retryable and job.attempts < MAX_ATTEMPTS:
+            await mark_for_retry(db, job, str(exc))
+            return JobOutcome(JobState.QUEUED, retryable=True)
+        clip.state = ArtifactState.FAILED
+        clip.updated_at = datetime.now(UTC)
+        await mark_failed(db, job, str(exc))
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+    except Exception:
+        logger.exception("generate_shot_clip crashed for job %s", job.id)
+        clip.state = ArtifactState.FAILED
+        clip.updated_at = datetime.now(UTC)
+        await mark_failed(db, job, "Animating the shot failed unexpectedly. Try again.")
+        await _close_hold(db, job, succeeded=False)
+        return JobOutcome(JobState.FAILED, retryable=False)
+
+    stored = await store_asset(
+        db, user_id=meld.user_id, data=result.bytes_, mime=_VIDEO_MIME, ext="mp4"
+    )
+
+    clip.asset_id = stored.id
+    clip.content_hash = content_hash_for_shot_clip(stored.sha256)
+    clip.input_hash = job.input_hash
+    clip.state = ArtifactState.FRESH
+    clip.provider = result.provider
+    clip.model = result.model
+    clip.params = {**clip.params, **CLIP_PARAMS}
+    clip.credits_spent = job.credits_held
+    clip.updated_at = datetime.now(UTC)
+
+    job.cost_usd = result.cost_usd
+    await recompute_staleness(db, job.meld_id)
+    await _close_hold(db, job, succeeded=True)
+    await mark_succeeded(db, job)
+    return JobOutcome(JobState.SUCCEEDED, retryable=False)
+
+
+async def generate_shot_clip(ctx: dict[str, Any], job_id: str) -> str:
+    """The arq task. Same shape as generate_shot_image."""
+    async with SessionLocal() as db:
+        outcome = await run_generate_shot_clip(db, uuid.UUID(job_id))
+        attempts = (
+            await db.execute(select(Job.attempts).where(Job.id == uuid.UUID(job_id)))
+        ).scalar_one_or_none()
+        await db.commit()
+
+    if outcome.retryable:
+        raise Retry(defer=2 ** (attempts or 1))
+    return outcome.state.value
+
+
+async def render_final(ctx: dict[str, Any], job_id: str) -> str:
+    """The arq task. Same shape as render_preview."""
+    async with SessionLocal() as db:
+        outcome = await run_render_final(db, uuid.UUID(job_id))
         attempts = (
             await db.execute(select(Job.attempts).where(Job.id == uuid.UUID(job_id)))
         ).scalar_one_or_none()
@@ -889,6 +1035,8 @@ class WorkerSettings:
         generate_speech,
         generate_music,
         render_preview,
+        generate_shot_clip,
+        render_final,
     ]
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     #: arq checks `job_try > max_tries` before executing, so this gates the

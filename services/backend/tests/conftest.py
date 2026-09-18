@@ -28,6 +28,7 @@ def _stub_providers_by_default(monkeypatch):
     monkeypatch.setattr(settings, "image_provider", "stub")
     monkeypatch.setattr(settings, "speech_provider", "stub")
     monkeypatch.setattr(settings, "music_provider", "stub")
+    monkeypatch.setattr(settings, "video_provider", "stub")
 
 
 @pytest.fixture(autouse=True)

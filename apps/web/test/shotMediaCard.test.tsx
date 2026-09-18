@@ -22,6 +22,7 @@ function shot(overrides: Partial<ShotMedia> = {}): ShotMedia {
     character_names: [],
     still: null,
     audio: null,
+    clip: null,
     ...overrides,
   };
 }

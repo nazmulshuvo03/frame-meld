@@ -13,7 +13,7 @@ from framemeld.models.job import JobKind
 from framemeld.models.meld import Meld
 from framemeld.models.render import Render, RenderKind
 from framemeld.models.script import ArtifactState, Scene, Shot
-from framemeld.models.shots import AudioClip, AudioKind, AudioOwnerType, ShotImage
+from framemeld.models.shots import AudioClip, AudioKind, AudioOwnerType, ShotClip, ShotImage
 from framemeld.moderation.service import Blocked, check_and_record
 from framemeld.render.hashes import (
     MUSIC_PARAMS,
@@ -22,7 +22,7 @@ from framemeld.render.hashes import (
     music_prompt,
     render_input_hash,
 )
-from framemeld.render.spec import PREVIEW_SIZE, SceneSpec, SpecAudio, SpecShot, ken_burns
+from framemeld.render.spec import SceneSpec, SpecAudio, SpecShot, ken_burns, size_for
 from framemeld.shots.generation import shots_in_film_order
 
 
@@ -56,6 +56,24 @@ class MissingStills(Exception):
         )
 
 
+class MissingClips(Exception):
+    """A Final render was asked for while some shot has no clip (M6-D7).
+
+    Same shape and same reason as MissingStills above, with more money on
+    it: a deliverable with a hole in it is worse than a refusal, and the
+    user has by then paid for every clip that *is* there.
+    """
+
+    def __init__(self, count: int, total: int) -> None:
+        self.count = count
+        self.total = total
+        super().__init__(f"{count}/{total}")
+        self.reason = (
+            f"{count} of {total} shots have no clip yet. "
+            "Animate them first — a final render with gaps in it is not the film."
+        )
+
+
 @dataclass(frozen=True)
 class FilmView:
     """Everything the Film page draws."""
@@ -65,9 +83,16 @@ class FilmView:
     #: line is `stills_ready` of `shot_count`, and the render button is
     #: refused below that.
     stills_ready: int
+    #: The same for clips, which gate the Final render instead (M6-D7).
+    #: `clips_stale` is counted separately because a stale clip still lets
+    #: a Final render happen -- it is the user's call whether to pay 80
+    #: credits to redo it.
+    clips_ready: int
+    clips_stale: int
     duration_sec: float
     music: AudioClip | None
     render: Render | None
+    final: Render | None
 
 
 async def _film_shots(db: DbSession, meld_id: uuid.UUID) -> list[Shot]:
@@ -103,6 +128,18 @@ async def _speech_by_shot(db: DbSession, shot_ids: list[uuid.UUID]) -> dict[uuid
         )
     ).scalars()
     return {clip.owner_id: clip for clip in rows}
+
+
+async def _clips_by_shot(db: DbSession, shot_ids: list[uuid.UUID]) -> dict[uuid.UUID, ShotClip]:
+    """Only clips that actually have bytes, for the same reason as stills."""
+    if not shot_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(ShotClip).where(ShotClip.shot_id.in_(shot_ids), ShotClip.asset_id.isnot(None))
+        )
+    ).scalars()
+    return {clip.shot_id: clip for clip in rows}
 
 
 async def _music_clip(db: DbSession, meld_id: uuid.UUID) -> AudioClip | None:
@@ -143,12 +180,16 @@ async def get_film(db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID) -> Fil
 
     shots = await _film_shots(db, meld_id)
     stills = await _stills_by_shot(db, [shot.id for shot in shots])
+    clips = await _clips_by_shot(db, [shot.id for shot in shots])
     return FilmView(
         shot_count=len(shots),
         stills_ready=sum(1 for shot in shots if shot.id in stills),
+        clips_ready=sum(1 for shot in shots if shot.id in clips),
+        clips_stale=sum(1 for clip in clips.values() if clip.state is ArtifactState.STALE),
         duration_sec=film_duration(shots),
         music=await _music_clip(db, meld_id),
         render=await _latest_render(db, meld_id, RenderKind.PREVIEW),
+        final=await _latest_render(db, meld_id, RenderKind.FINAL),
     )
 
 
@@ -176,10 +217,22 @@ async def build_scene_spec(db: DbSession, meld_id: uuid.UUID, kind: RenderKind) 
     speech = await _speech_by_shot(db, [shot.id for shot in shots])
     music = await _music_clip(db, meld_id)
 
+    # Only a Final reads clips. A Preview that happened to find some would
+    # animate the stills anyway (spec 4.2), and putting them in its hash
+    # would mean animating a shot invalidated the free draft.
+    clips = (
+        await _clips_by_shot(db, [shot.id for shot in shots]) if kind is RenderKind.FINAL else {}
+    )
+    if kind is RenderKind.FINAL:
+        absent = [shot for shot in shots if shot.id not in clips]
+        if absent:
+            raise MissingClips(len(absent), len(shots))
+
     spec_shots = []
     for index, shot in enumerate(shots):
         still = stills[shot.id]
         clip = speech.get(shot.id)
+        video = clips.get(shot.id)
         motion_from, motion_to = ken_burns(shot, index)
         spec_shots.append(
             SpecShot(
@@ -189,6 +242,8 @@ async def build_scene_spec(db: DbSession, meld_id: uuid.UUID, kind: RenderKind) 
                 # and the missing check ran before this loop.
                 still_asset_id=still.asset_id,  # type: ignore[arg-type]
                 still_content_hash=still.content_hash,
+                clip_asset_id=None if video is None else video.asset_id,
+                clip_content_hash=None if video is None else video.content_hash,
                 motion_from=motion_from,
                 motion_to=motion_to,
                 audio=(
@@ -209,7 +264,7 @@ async def build_scene_spec(db: DbSession, meld_id: uuid.UUID, kind: RenderKind) 
             )
         )
 
-    width, height = PREVIEW_SIZE
+    width, height = size_for(kind)
     return SceneSpec(
         kind=kind,
         width=width,
@@ -322,41 +377,65 @@ async def request_music(
     return dispatch
 
 
-async def request_preview(
-    db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID
-) -> JobDispatch | None:
-    """Queue a Preview render. No quote and no hold (M5-D7).
+#: Which job kind renders which sort of film, and what a hold costs.
+#: Preview is deliberately absent from QUOTES (M5-D7), so the two kinds
+#: differ in exactly one place rather than in two parallel functions.
+_RENDER_JOB = {
+    RenderKind.PREVIEW: JobKind.RENDER_PREVIEW,
+    RenderKind.FINAL: JobKind.RENDER_FINAL,
+}
 
-    Spec 4.2 and 9 both say Preview is free, and it is free for a reason:
-    it is the approval gate that makes a $6 Final render humane. What stops
-    a script pressing this thirty thousand times is the mechanism that
-    already exists -- the render's input_hash is its idempotency key, so a
-    second press with nothing changed starts no work at all.
+
+async def _request_render(
+    db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID, kind: RenderKind
+) -> JobDispatch | None:
+    """Queue one render of either sort.
+
+    One function rather than two, because the two differ only in size, in
+    whether a shot's source is its still or its clip, and in whether money
+    changes hands -- and every one of those differences is already data.
+    Two near-identical functions would be two places for the idempotency
+    rule to drift.
     """
     meld = await get_meld(db, user_id, meld_id)
     if meld is None:
         return None
 
-    spec = await build_scene_spec(db, meld_id, RenderKind.PREVIEW)
-    input_hash = render_input_hash(spec.to_hash_payload(), RenderKind.PREVIEW)
+    spec = await build_scene_spec(db, meld_id, kind)
+    input_hash = render_input_hash(spec.to_hash_payload(), kind)
 
-    render = await _latest_render(db, meld_id, RenderKind.PREVIEW)
+    render = await _latest_render(db, meld_id, kind)
     now = datetime.now(UTC)
     if render is None:
-        render = Render(meld_id=meld_id, kind=RenderKind.PREVIEW, input_hash=input_hash)
+        render = Render(meld_id=meld_id, kind=kind, input_hash=input_hash)
         db.add(render)
         await db.flush()
 
     dispatch = await ensure_job(
         db,
         meld_id=meld_id,
-        kind=JobKind.RENDER_PREVIEW,
+        kind=_RENDER_JOB[kind],
         target_table="renders",
         target_id=render.id,
         input_hash=input_hash,
     )
 
     if dispatch.enqueued:
+        if kind is RenderKind.FINAL:
+            # A Preview takes no hold at all (M5-D7); a Final is the
+            # deliverable and is charged like every other generation.
+            credits = quote_for(JobKind.RENDER_FINAL)
+            await hold(
+                db,
+                user_id=user_id,
+                job_id=dispatch.job.id,
+                meld_id=meld_id,
+                credits=credits,
+                description="final render",
+            )
+            dispatch.job.credits_held = credits
+            render.credits_spent = credits
+
         # The spec is stored now rather than by the worker, so a render
         # that never finishes still says what it was asked to make. Asset
         # ids, never the signed URLs -- a stored signature is a stored
@@ -370,3 +449,24 @@ async def request_preview(
         await db.flush()
 
     return dispatch
+
+
+async def request_preview(
+    db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID
+) -> JobDispatch | None:
+    """Queue a Preview render. No quote and no hold (M5-D7).
+
+    Spec 4.2 and 9 both say Preview is free, and it is free for a reason:
+    it is the approval gate that makes a $6 Final render humane. What stops
+    a script pressing this thirty thousand times is the mechanism that
+    already exists -- the render's input_hash is its idempotency key, so a
+    second press with nothing changed starts no work at all.
+    """
+    return await _request_render(db, user_id, meld_id, RenderKind.PREVIEW)
+
+
+async def request_final(
+    db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID
+) -> JobDispatch | None:
+    """Queue the deliverable (M6). Charged, and refused with gaps."""
+    return await _request_render(db, user_id, meld_id, RenderKind.FINAL)

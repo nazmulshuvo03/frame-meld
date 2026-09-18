@@ -43,6 +43,13 @@ class FilmOut(BaseModel):
     #: "{stills_ready} of {shot_count} shots drawn" and the render button
     #: is refused below parity (M5-D4).
     stills_ready: int
+    #: The same for clips, gating the Final render instead (M6-D7). A stale
+    #: clip still counts as ready -- whether to pay 80 credits to redo it is
+    #: the user's call, so it is reported separately rather than silently
+    #: blocking the deliverable.
+    clips_ready: int
+    clips_stale: int
     duration_sec: float
     music: MusicOut | None
     preview: RenderOut | None
+    final: RenderOut | None

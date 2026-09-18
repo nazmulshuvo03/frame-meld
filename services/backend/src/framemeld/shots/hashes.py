@@ -213,3 +213,70 @@ def audio_clip_input_hash(shot_speech_hash: str, kind: AudioKind) -> str:
             "params": SPEECH_PARAMS,
         }
     )
+
+
+#: Bump when the clip request changes shape in a way that would animate the
+#: same still differently. Every existing clip correctly goes stale, at 80
+#: credits each -- so bump it very deliberately.
+CLIP_PROMPT_VERSION = 1
+
+CLIP_PARAMS: dict[str, object] = {
+    "prompt_version": CLIP_PROMPT_VERSION,
+}
+
+
+def motion_hash_for_shot(shot: Shot) -> str:
+    """The part of a shot a clip is actually animated from (M6-D1).
+
+    `motion_prompt` and `duration_sec` -- exactly what spec section 3.3's
+    `animate(image_url, motion_prompt, duration_sec, params)` takes besides
+    the picture. The fourth narrow projection of a shot, and the one that
+    finally gives `motion_prompt` a hash to belong to: M5-D5 kept it out of
+    the Preview render's key because the Preview never reads it, and the
+    same rule puts it in here, because the clip is what it was written for.
+
+    Disjoint from visual_hash_for_shot and speech_hash_for_shot, so
+    rewriting a line re-records nothing visual and rewording an image prompt
+    re-animates nothing -- but note that `duration_sec` is shared with the
+    render's hash, because a clip's length and a film's timeline are the
+    same fact.
+    """
+    return canonical_hash(
+        {
+            "kind": "shot_motion",
+            "motion_prompt": shot.motion_prompt,
+            # Through str() because a Decimal is not JSON-native and
+            # canonical_hash refuses one -- the same treatment the script's
+            # own hash gives it, so the two agree on what 4.00 is.
+            "duration_sec": str(shot.duration_sec),
+        }
+    )
+
+
+def shot_clip_input_hash(shot_motion_hash: str, source_content_hash: str) -> str:
+    """What would produce this clip right now.
+
+    Two parents, and the second one is the *still's bytes* rather than the
+    shot's visual hash: spec section 4.1's graph is `shot_image ->
+    shot_clip`, and it matters. Redrawing a still must re-animate it;
+    rewording an image prompt without redrawing must not, because the model
+    is handed the picture, not the sentence that produced it.
+
+    Reads the *video* provider settings. Fifth independent invalidation
+    domain: switching image, speech or music models re-animates nothing.
+    """
+    return canonical_hash(
+        {
+            "kind": "shot_clip",
+            "shot_motion_hash": shot_motion_hash,
+            "source_content_hash": source_content_hash,
+            "provider": settings.video_provider,
+            "model": settings.video_model,
+            "params": CLIP_PARAMS,
+        }
+    )
+
+
+def content_hash_for_shot_clip(asset_sha256: str) -> str:
+    """What the clip *is*. The Final render keys on it."""
+    return canonical_hash({"kind": "shot_clip_content", "asset_sha256": asset_sha256})

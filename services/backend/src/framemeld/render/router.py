@@ -20,6 +20,7 @@ Jobs = Annotated[Queue, Depends(get_queue)]
 
 GENERATE_MUSIC_TASK = "generate_music"
 RENDER_PREVIEW_TASK = "render_preview"
+RENDER_FINAL_TASK = "render_final"
 
 
 def _not_found() -> HTTPException:
@@ -55,9 +56,12 @@ async def get_film(meld_id: uuid.UUID, user: CurrentUser, db: Db) -> FilmOut:
     return FilmOut(
         shot_count=view.shot_count,
         stills_ready=view.stills_ready,
+        clips_ready=view.clips_ready,
+        clips_stale=view.clips_stale,
         duration_sec=view.duration_sec,
         music=MusicOut.model_validate(view.music) if view.music is not None else None,
         preview=RenderOut.model_validate(view.render) if view.render is not None else None,
+        final=RenderOut.model_validate(view.final) if view.final is not None else None,
     )
 
 
@@ -96,4 +100,25 @@ async def render_preview(meld_id: uuid.UUID, user: CurrentUser, db: Db, jobs: Jo
     await db.commit()
     if dispatch.enqueued:
         await jobs.enqueue(RENDER_PREVIEW_TASK, dispatch.job.id)
+    return dispatch.job
+
+
+@router.post("/film/final", status_code=status.HTTP_202_ACCEPTED, response_model=JobOut)
+async def render_final(meld_id: uuid.UUID, user: CurrentUser, db: Db, jobs: Jobs):
+    try:
+        dispatch = await service.request_final(db, user.id, meld_id)
+    except service.MissingClips as exc:
+        raise _unprocessable(exc.reason) from None
+    except service.MissingStills as exc:
+        raise _unprocessable(exc.reason) from None
+    except service.NothingToRender as exc:
+        raise _unprocessable(exc.reason) from None
+    except InsufficientCredits as exc:
+        raise await _cannot_pay(db, exc) from None
+    if dispatch is None:
+        raise _not_found()
+
+    await db.commit()
+    if dispatch.enqueued:
+        await jobs.enqueue(RENDER_FINAL_TASK, dispatch.job.id)
     return dispatch.job

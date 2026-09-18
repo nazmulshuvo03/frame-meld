@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CreditBalance } from "@/components/CreditBalance";
@@ -9,19 +9,25 @@ import { StaleBadge } from "@/components/StaleBadge";
 import { useJobPolling } from "@/lib/useJobPolling";
 import {
   ApiError,
+  assetDownloadUrl,
   assetUrl,
   type FilmView,
+  generateClip,
   generateMusic,
   getBalance,
   getFilm,
   getPricing,
+  getShots,
   type Job,
+  renderFinal,
   renderPreview,
 } from "@/lib/api";
 
 //: Used only until /credits/pricing lands — see the Cast page for why this
 //: exists and why it is never the source of truth.
 const FALLBACK_MUSIC_CREDITS = 24;
+const FALLBACK_CLIP_CREDITS = 80;
+const FALLBACK_FINAL_CREDITS = 60;
 
 export default function FilmPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -33,6 +39,13 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
   const [loadError, setLoadError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // M6-D11 / M4-D5: animating is N ordinary per-shot jobs run one at a
+  // time, not a batch job — so one clip failing refunds its own 80 credits
+  // and the rest still get made. The same queue-in-the-page shape the Shots
+  // page uses, which reuses the single-job polling hook unchanged.
+  const pending = useRef<string[]>([]);
+  const [remaining, setRemaining] = useState(0);
 
   const loadBalance = useCallback(
     () => getBalance().then((result) => setBalance(result.balance), () => {}),
@@ -61,17 +74,45 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
     getPricing().then((pricing) => setQuotes(pricing.quotes), () => {});
   }, [load, loadBalance]);
 
+  const drainQueue = useCallback(() => {
+    // A local declaration rather than the useCallback calling itself: the
+    // cache-hit branch has to continue straight to the next shot without
+    // waiting for a poll that will never happen.
+    function step() {
+      const next = pending.current.shift();
+      setRemaining(pending.current.length);
+      if (next === undefined) return;
+      generateClip(id, next).then(
+        (started) => {
+          if (started.state === "succeeded") {
+            void load();
+            step();
+          } else {
+            setJobId(started.id);
+          }
+        },
+        (err) => {
+          // One clip failing does not abandon the rest. Typically a 402.
+          if (err instanceof ApiError) setActionError(err.message);
+          step();
+        },
+      );
+    }
+    step();
+  }, [id, load]);
+
   const onSettled = useCallback(
     (job: Job) => {
       setJobId(null);
       if (job.state === "failed") {
-        setActionError(job.error ?? "That failed. Nothing was charged for a render.");
+        setActionError(job.error ?? "That failed. Anything charged was refunded.");
       } else {
         void load();
       }
       void loadBalance();
+      drainQueue();
     },
-    [load, loadBalance],
+    [drainQueue, load, loadBalance],
   );
 
   const { job } = useJobPolling({ meldId: id, jobId, onSettled });
@@ -107,11 +148,30 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
     return <main className="p-8 text-sm text-neutral-500">Loading…</main>;
   }
 
-  const busy = jobId !== null;
+  const busy = jobId !== null || remaining > 0;
   const musicCredits = quotes?.generate_music ?? FALLBACK_MUSIC_CREDITS;
+  const clipCredits = quotes?.generate_shot_clip ?? FALLBACK_CLIP_CREDITS;
+  const finalCredits = quotes?.render_final ?? FALLBACK_FINAL_CREDITS;
   const undrawn = film.shot_count - film.stills_ready;
   const ready = film.shot_count > 0 && undrawn === 0;
+  const unanimated = film.shot_count - film.clips_ready;
+  const animated = film.shot_count > 0 && unanimated === 0;
   const preview = film.preview;
+  const final = film.final;
+
+  const onAnimateAll = () => {
+    setActionError(null);
+    // Fetched here rather than held in state: the Film page does not
+    // otherwise need the shot list, and asking for it on the one click that
+    // needs it is cheaper than keeping a second copy in sync.
+    void getShots(id).then((view) => {
+      pending.current = view.shots
+        .filter((shot) => shot.still?.asset_id && shot.clip?.state !== "fresh")
+        .map((shot) => shot.id);
+      setRemaining(pending.current.length);
+      drainQueue();
+    });
+  };
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
@@ -233,6 +293,108 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
                   {film.music.duration_sec ?? "?"}s · {film.music.credits_spent} credits
                 </p>
                 <p className="mt-2 text-xs text-neutral-500">{film.music.text}</p>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded border border-neutral-200 p-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h2 className="font-medium">Clips</h2>
+              <div className="flex items-center gap-3">
+                {remaining > 0 && (
+                  <span role="status" className="text-sm text-neutral-500">
+                    {remaining} left…
+                  </span>
+                )}
+                {unanimated > 0 || film.clips_stale > 0 ? (
+                  <QuoteButton
+                    credits={clipCredits * Math.max(unanimated + film.clips_stale, 1)}
+                    balance={balance}
+                    busy={busy}
+                    busyLabel="Animating…"
+                    label={
+                      unanimated > 0
+                        ? `Animate the ${unanimated + film.clips_stale} remaining`
+                        : `Re-animate ${film.clips_stale}`
+                    }
+                    onClick={onAnimateAll}
+                  />
+                ) : null}
+              </div>
+            </div>
+
+            <p className="mt-2 text-sm text-neutral-600">
+              Each still animated into a real video clip. This is the expensive part —{" "}
+              {clipCredits} credits a shot — so watch the preview first and be happy with
+              the pacing before you spend it.
+            </p>
+
+            <p className="mt-3 text-sm text-neutral-500">
+              {film.clips_ready} of {film.shot_count} shots animated
+              {film.clips_stale > 0 && (
+                <>
+                  {" · "}
+                  <span className="text-amber-900">
+                    {film.clips_stale} out of date since the still changed
+                  </span>
+                </>
+              )}
+            </p>
+          </section>
+
+          <section className="rounded border border-neutral-200 p-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h2 className="font-medium">
+                Final
+                {final?.state === "stale" && <StaleBadge />}
+              </h2>
+              <QuoteButton
+                credits={finalCredits}
+                balance={balance}
+                busy={busy}
+                disabled={!animated}
+                busyLabel={
+                  job?.kind === "render_final" && job.state === "running"
+                    ? "Assembling…"
+                    : "Queued…"
+                }
+                label={final?.asset_id ? "Render it again" : "Render the film"}
+                onClick={() => void start(() => renderFinal(id))}
+              />
+            </div>
+
+            <p className="mt-2 text-sm text-neutral-600">
+              The deliverable: your clips, cut together at 1920×1080 with the full audio.
+            </p>
+
+            {!animated && (
+              <p role="status" className="mt-3 text-sm text-amber-900">
+                {unanimated} of {film.shot_count} shots have no clip yet. Animate them
+                first — a final render with gaps in it is not the film.
+              </p>
+            )}
+
+            {final?.asset_id && (
+              <div className="mt-4">
+                <video
+                  key={final.asset_id}
+                  src={assetUrl(final.asset_id)}
+                  controls
+                  className="w-full rounded bg-black"
+                />
+                <div className="mt-2 flex flex-wrap items-baseline justify-between gap-3">
+                  <p className="text-xs text-neutral-500">
+                    {final.resolution} · {final.duration_sec ?? "?"}s
+                    {final.state === "stale" &&
+                      " · the film has changed since this was made"}
+                  </p>
+                  <a
+                    href={assetDownloadUrl(final.asset_id)}
+                    className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50"
+                  >
+                    Download the film
+                  </a>
+                </div>
               </div>
             )}
           </section>

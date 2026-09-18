@@ -156,3 +156,52 @@ class AudioClip(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ShotClip(Base):
+    """The real AI video for one shot (spec section 5.3).
+
+    Hangs off the `shot_images` row rather than off the shot: a clip is
+    animated *from a specific picture*, and spec section 4.1's graph says so
+    (`shot_image -> shot_clip`). Keeping the source as a foreign key means
+    "which still is this clip of" is answerable from the row, which is what
+    spec section 11's character-drift mitigation rests on.
+    """
+
+    __tablename__ = "shot_clips"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    shot_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("shots.id", ondelete="CASCADE"), index=True
+    )
+    #: SET NULL rather than CASCADE: a clip outlives the still it was made
+    #: from, because the file it produced is still that user's and still
+    #: watchable. The column explains a video that exists, the same way
+    #: `ref_character_image_ids` explains a picture that exists.
+    source_image_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("shot_images.id", ondelete="SET NULL"), nullable=True
+    )
+    #: What the provider was asked for, not what came back. Video models
+    #: round to their own frame counts, so the two genuinely differ, and the
+    #: scene spec lays out a timeline from the shot's duration rather than
+    #: from this.
+    duration_sec: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
+    input_hash: Mapped[str] = mapped_column(String(64))
+    state: Mapped[ArtifactState] = mapped_column(
+        enum_column(ArtifactState, "shot_clip_state"), default=ArtifactState.EMPTY
+    )
+
+    provider: Mapped[str] = mapped_column(String(40), default="")
+    model: Mapped[str] = mapped_column(String(120), default="")
+    params: Mapped[dict] = mapped_column(JSONB, default=dict)
+    credits_spent: Mapped[int] = mapped_column(Integer, default=0)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("assets.id", ondelete="SET NULL"), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -30,6 +30,14 @@ PRICING_VERSION = 1
 #: ACE-Step ~$0.008 (spec sections 6 and 6.3); 24 credits is the same ~3x
 #: markup the image actions carry, taken against the dearer of the two.
 #:
+#: generate_shot_clip: the one expensive action in this product. Spec
+#: section 7 puts the clips at $6.00 of a $6.90 film and implies $25-30
+#: retail, i.e. 2,500-3,000 credits; 30 x 80 = 2,400 of that, and the
+#: M3-M5 actions on a 30-shot, 5-character film come to ~514.
+#: render_final: section 7's $0.20 of render compute at the same ~3x
+#: markup the image actions carry. Unlike a Preview it is charged,
+#: because it is the deliverable rather than the gate in front of it.
+#:
 #: render_preview is deliberately absent (M5-D7). Spec 4.2 and 9 both make
 #: Preview free, because it is the approval gate that makes a $6 Final
 #: render humane -- charging for it would defeat what it is for. Its abuse
@@ -42,6 +50,8 @@ QUOTES: dict[JobKind, int] = {
     JobKind.GENERATE_SHOT_IMAGE: 12,
     JobKind.GENERATE_SPEECH: 2,
     JobKind.GENERATE_MUSIC: 24,
+    JobKind.GENERATE_SHOT_CLIP: 80,
+    JobKind.RENDER_FINAL: 60,
 }
 
 

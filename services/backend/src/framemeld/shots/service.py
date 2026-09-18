@@ -12,16 +12,26 @@ from framemeld.melds.service import get_meld
 from framemeld.models.cast import Character, CharacterImage, CharacterImageKind
 from framemeld.models.job import Job, JobKind
 from framemeld.models.script import ArtifactState, DialogueKind, Scene, Shot
-from framemeld.models.shots import AudioClip, AudioKind, AudioOwnerType, ShotCharacter, ShotImage
+from framemeld.models.shots import (
+    AudioClip,
+    AudioKind,
+    AudioOwnerType,
+    ShotCharacter,
+    ShotClip,
+    ShotImage,
+)
 from framemeld.moderation.service import Blocked, check_and_record
 from framemeld.providers.speech.voices import DEFAULT_VOICE_ID
 from framemeld.shots.generation import shots_in_film_order
 from framemeld.shots.hashes import (
+    CLIP_PARAMS,
     audio_clip_input_hash,
     cast_hash,
     casting_hash_for_character,
     casting_hash_for_shot,
+    motion_hash_for_shot,
     shot_characters_input_hash,
+    shot_clip_input_hash,
     shot_image_input_hash,
     speech_hash_for_shot,
     visual_hash_for_shot,
@@ -57,6 +67,26 @@ class MissingSheets(Exception):
         )
 
 
+class NothingToAnimate(Exception):
+    """A clip was asked for on a shot with no drawn still (M6-D2).
+
+    Refused rather than generated: image-to-video is conditioned on a
+    picture, so there is literally nothing to send. A *stale* still is
+    allowed through -- spec section 11's mitigation for character drift is
+    that stills are approved before any clip is made, and a user animating
+    a still they can see on screen is that approval. Refusing on stale
+    would also make a Meld unfinishable after any upstream edit until every
+    still had been paid for again.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("no still")
+        self.reason = (
+            "Draw this shot's still first — a clip is animated from the picture, "
+            "so there is nothing to animate yet."
+        )
+
+
 class NothingToSay(Exception):
     """Speech was asked for on a shot with no line. Same reasoning: a 422
     rather than a paid recording of silence."""
@@ -70,6 +100,7 @@ class ShotMedia:
     characters: list[Character]
     still: ShotImage | None
     audio: AudioClip | None
+    clip: ShotClip | None
 
 
 async def _owned_shot(db: DbSession, meld_id: uuid.UUID, shot_id: uuid.UUID) -> Shot | None:
@@ -166,12 +197,20 @@ async def get_shots(
         ).scalars()
     }
 
+    videos = {
+        video.shot_id: video
+        for video in (
+            await db.execute(select(ShotClip).where(ShotClip.shot_id.in_(shot_ids)))
+        ).scalars()
+    }
+
     return [
         ShotMedia(
             shot=shot,
             characters=by_shot.get(shot.id, []),
             still=stills.get(shot.id),
             audio=clips.get(shot.id),
+            clip=videos.get(shot.id),
         )
         for shot in shots
     ]
@@ -425,6 +464,87 @@ async def request_speech(
         clip.kind = kind
         clip.text = shot.speech_text
         clip.voice_id = voice_id
+        clip.state = ArtifactState.GENERATING
+        clip.updated_at = now
+        await db.flush()
+
+    return dispatch
+
+
+async def request_clip(
+    db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID, shot_id: uuid.UUID
+) -> JobDispatch | None:
+    """Queue the one expensive generation in this product (M6).
+
+    No moderation call: the still this animates already passed the gate
+    when it was drawn, and `motion_prompt` describes camera movement rather
+    than content. A second classification of the same approved picture
+    would be a second chance to refuse work the user has already paid to
+    produce.
+    """
+    meld = await get_meld(db, user_id, meld_id)
+    if meld is None:
+        return None
+    shot = await _owned_shot(db, meld_id, shot_id)
+    if shot is None:
+        return None
+
+    still = (
+        await db.execute(
+            select(ShotImage).where(ShotImage.shot_id == shot.id, ShotImage.asset_id.isnot(None))
+        )
+    ).scalar_one_or_none()
+    if still is None:
+        raise NothingToAnimate
+
+    input_hash = shot_clip_input_hash(motion_hash_for_shot(shot), still.content_hash)
+
+    # One clip row per shot, rewritten in place on regeneration -- the same
+    # rule as one still per shot. Created before the job so target_id is
+    # stable across retries and the idempotency key means what it says.
+    clip = (
+        await db.execute(select(ShotClip).where(ShotClip.shot_id == shot.id))
+    ).scalar_one_or_none()
+    now = datetime.now(UTC)
+    if clip is None:
+        clip = ShotClip(
+            shot_id=shot.id,
+            source_image_id=still.id,
+            duration_sec=shot.duration_sec,
+            input_hash=input_hash,
+            state=ArtifactState.GENERATING,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(clip)
+        await db.flush()
+
+    dispatch = await ensure_job(
+        db,
+        meld_id=meld_id,
+        kind=JobKind.GENERATE_SHOT_CLIP,
+        target_table="shot_clips",
+        target_id=clip.id,
+        input_hash=input_hash,
+    )
+
+    if dispatch.enqueued:
+        credits = quote_for(JobKind.GENERATE_SHOT_CLIP)
+        await hold(
+            db,
+            user_id=user_id,
+            job_id=dispatch.job.id,
+            meld_id=meld_id,
+            credits=credits,
+            description="shot clip",
+        )
+        dispatch.job.credits_held = credits
+        # Rewritten here, not in the worker, for the reason M4's _load_refs
+        # gives: these are what the hold was priced against, and the user
+        # can edit the shot while the job sits in the queue.
+        clip.source_image_id = still.id
+        clip.duration_sec = shot.duration_sec
+        clip.params = {**CLIP_PARAMS, "motion_prompt": shot.motion_prompt}
         clip.state = ArtifactState.GENERATING
         clip.updated_at = now
         await db.flush()

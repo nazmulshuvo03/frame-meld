@@ -12,7 +12,13 @@ from framemeld.jobs.schemas import JobOut
 from framemeld.moderation.service import Blocked
 from framemeld.script.schemas import ShotOut
 from framemeld.shots import service
-from framemeld.shots.schemas import AudioClipOut, ShotImageOut, ShotMediaOut, ShotsOut
+from framemeld.shots.schemas import (
+    AudioClipOut,
+    ShotClipOut,
+    ShotImageOut,
+    ShotMediaOut,
+    ShotsOut,
+)
 
 router = APIRouter(prefix="/melds/{meld_id}", tags=["shots"])
 
@@ -22,6 +28,7 @@ Jobs = Annotated[Queue, Depends(get_queue)]
 MAP_SHOT_CHARACTERS_TASK = "map_shot_characters"
 GENERATE_SHOT_IMAGE_TASK = "generate_shot_image"
 GENERATE_SPEECH_TASK = "generate_speech"
+GENERATE_SHOT_CLIP_TASK = "generate_shot_clip"
 
 
 def _not_found() -> HTTPException:
@@ -66,6 +73,7 @@ def _as_media(item: service.ShotMedia) -> ShotMediaOut:
         character_names=[character.name for character in item.characters],
         still=ShotImageOut.model_validate(item.still) if item.still is not None else None,
         audio=AudioClipOut.model_validate(item.audio) if item.audio is not None else None,
+        clip=ShotClipOut.model_validate(item.clip) if item.clip is not None else None,
     )
 
 
@@ -149,4 +157,23 @@ async def generate_speech(
     await db.commit()
     if dispatch.enqueued:
         await jobs.enqueue(GENERATE_SPEECH_TASK, dispatch.job.id)
+    return dispatch.job
+
+
+@router.post("/shots/{shot_id}/clip", status_code=status.HTTP_202_ACCEPTED, response_model=JobOut)
+async def generate_clip(
+    meld_id: uuid.UUID, shot_id: uuid.UUID, user: CurrentUser, db: Db, jobs: Jobs
+):
+    try:
+        dispatch = await service.request_clip(db, user.id, meld_id, shot_id)
+    except service.NothingToAnimate as exc:
+        raise _unprocessable(exc.reason) from None
+    except InsufficientCredits as exc:
+        raise await _cannot_pay(db, exc) from None
+    if dispatch is None:
+        raise _not_found()
+
+    await db.commit()
+    if dispatch.enqueued:
+        await jobs.enqueue(GENERATE_SHOT_CLIP_TASK, dispatch.job.id)
     return dispatch.job

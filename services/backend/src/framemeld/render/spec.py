@@ -15,10 +15,16 @@ SPEC_VERSION = 1
 FPS = 30
 
 #: Preview is the cheap iteration gate (spec section 4.2), so it renders at
-#: 720p (M5-D6). Spec section 3.2's 1920x1080 example is Final's, and
-#: arrives with M6.
+#: 720p (M5-D6); Final is the deliverable and renders at spec section 3.2's
+#: 1920x1080 (M6-D6). `renders.resolution` records which was used, so the
+#: two are distinguishable after the fact.
 PREVIEW_SIZE = (1280, 720)
 FINAL_SIZE = (1920, 1080)
+
+
+def size_for(kind: RenderKind) -> tuple[int, int]:
+    return FINAL_SIZE if kind is RenderKind.FINAL else PREVIEW_SIZE
+
 
 #: How far under the narration the score sits (M5-D12). A fixed duck rather
 #: than sidechain compression: the fancier version is a mixing feature and
@@ -45,6 +51,10 @@ class SpecShot:
     motion_from: tuple[float, float, float]
     motion_to: tuple[float, float, float]
     audio: list[SpecAudio]
+    #: The animated clip, in a Final render. None in a Preview, and None in
+    #: a Final is a bug the assembler refuses before it gets here (M6-D7).
+    clip_asset_id: uuid.UUID | None = None
+    clip_content_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -92,9 +102,13 @@ class SceneSpec:
                     "id": str(shot.shot_id),
                     "duration_sec": shot.duration_sec,
                     "still_url": signed_asset_url(shot.still_asset_id),
-                    # Null in a preview; M6 fills it and the composition
-                    # reads it instead of the still (spec section 4.2).
-                    "clip_url": None,
+                    # Filled only in a Final. The composition reads it
+                    # instead of the still, and ignores `motion` when it is
+                    # there (spec section 4.2) -- which is the whole
+                    # difference between the two modes.
+                    "clip_url": (
+                        None if shot.clip_asset_id is None else signed_asset_url(shot.clip_asset_id)
+                    ),
                     "motion": {
                         "kind": "kenburns",
                         "from": list(shot.motion_from),
@@ -138,6 +152,7 @@ class SceneSpec:
                 {
                     "duration_sec": shot.duration_sec,
                     "still": shot.still_content_hash,
+                    "clip": shot.clip_content_hash,
                     "motion": {"from": list(shot.motion_from), "to": list(shot.motion_to)},
                     "transition_in": "cut",
                     "audio": [

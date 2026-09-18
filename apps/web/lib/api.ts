@@ -265,6 +265,12 @@ export type Pricing = { version: number; quotes: Record<string, number> };
  *  are same-site, and the reason M5's signed URLs exist. */
 export const assetUrl = (assetId: string) => `${BASE}/assets/${assetId}`;
 
+/** Saves rather than opens. The HTML `download` attribute is ignored for
+ *  cross-origin URLs and web and api are different origins, so the header
+ *  has to come from the server. */
+export const assetDownloadUrl = (assetId: string) =>
+  `${BASE}/assets/${assetId}?download=true`;
+
 export const getCast = (meldId: string) => request<CastView>(`/melds/${meldId}/cast`);
 
 export const generateCast = (meldId: string) =>
@@ -318,11 +324,24 @@ export type AudioClip = {
 
 /** A shot plus everything generated from it. Extends Shot rather than
  *  restating it: the Script and Shots pages show the same rows. */
+export type ShotClip = {
+  id: string;
+  state: string;
+  /** Null until a generation succeeds. */
+  asset_id: string | null;
+  /** Which still this was animated from. */
+  source_image_id: string | null;
+  duration_sec: string | null;
+  credits_spent: number;
+  updated_at: string;
+};
+
 export type ShotMedia = Shot & {
   character_ids: string[];
   character_names: string[];
   still: ShotImage | null;
   audio: AudioClip | null;
+  clip: ShotClip | null;
 };
 
 export type ShotsView = {
@@ -383,9 +402,14 @@ export type FilmView = {
    *  parity with shot_count — a film with holes in it tells the user
    *  nothing about the film. */
   stills_ready: number;
+  /** The same for clips, which gate the Final render instead. A stale clip
+   *  still counts as ready — whether to pay to redo it is the user's call. */
+  clips_ready: number;
+  clips_stale: number;
   duration_sec: number;
   music: Music | null;
   preview: Render | null;
+  final: Render | null;
 };
 
 export const getFilm = (meldId: string) => request<FilmView>(`/melds/${meldId}/film`);
@@ -399,5 +423,16 @@ export const renderPreview = (meldId: string) =>
     // A render takes far longer than a generation to *start*, because the
     // API assembles the whole scene spec before it answers. The default
     // 15 s is a timeout this one request can genuinely hit on a long film.
+    timeoutMs: 60_000,
+  });
+
+export const generateClip = (meldId: string, shotId: string) =>
+  request<Job>(`/melds/${meldId}/shots/${shotId}/clip`, { method: "POST" });
+
+export const renderFinal = (meldId: string) =>
+  request<Job>(`/melds/${meldId}/film/final`, {
+    method: "POST",
+    // Same reason as renderPreview: the API assembles the whole scene spec
+    // before it answers.
     timeoutMs: 60_000,
   });

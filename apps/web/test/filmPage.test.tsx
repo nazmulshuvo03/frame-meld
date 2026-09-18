@@ -8,10 +8,13 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }));
 
 const api = vi.hoisted(() => ({
   getFilm: vi.fn(),
+  getShots: vi.fn(),
   getBalance: vi.fn(),
   getPricing: vi.fn(),
   generateMusic: vi.fn(),
+  generateClip: vi.fn(),
   renderPreview: vi.fn(),
+  renderFinal: vi.fn(),
   getJob: vi.fn(),
 }));
 
@@ -26,9 +29,12 @@ function film(overrides: Partial<FilmView> = {}): FilmView {
   return {
     shot_count: 4,
     stills_ready: 4,
+    clips_ready: 0,
+    clips_stale: 0,
     duration_sec: 16,
     music: null,
     preview: null,
+    final: null,
     ...overrides,
   };
 }
@@ -61,7 +67,10 @@ describe("FilmPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.getBalance.mockResolvedValue({ balance: 500 });
-    api.getPricing.mockResolvedValue({ version: 1, quotes: { generate_music: 24 } });
+    api.getPricing.mockResolvedValue({
+      version: 1,
+      quotes: { generate_music: 24, generate_shot_clip: 80, render_final: 60 },
+    });
   });
 
   it("offers the preview for free, never for credits", async () => {
@@ -154,5 +163,87 @@ describe("FilmPage", () => {
     await show(film({ shot_count: 0, stills_ready: 0, duration_sec: 0 }));
     expect(screen.getByText(/Generate a script first/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Render the preview/ })).not.toBeInTheDocument();
+  });
+
+  // --- M6: clips, the Final render and the download ----------------------
+
+  it("refuses the final render until every shot has a clip, and says how many", async () => {
+    await show(film({ shot_count: 11, stills_ready: 11, clips_ready: 8 }));
+    expect(screen.getByRole("button", { name: /Render the film/ })).toBeDisabled();
+    expect(screen.getByText(/3 of 11 shots have no clip yet/)).toBeInTheDocument();
+  });
+
+  it("enables the final render once everything is animated", async () => {
+    await show(film({ shot_count: 4, stills_ready: 4, clips_ready: 4 }));
+    expect(screen.getByRole("button", { name: /Render the film · 60 credits/ })).toBeEnabled();
+  });
+
+  it("quotes the whole animation run on the button face", async () => {
+    // 4 shots, none animated, 80 credits each — the price of the action
+    // before the click, like every other batch button here.
+    await show(film({ shot_count: 4, stills_ready: 4, clips_ready: 0 }));
+    expect(
+      screen.getByRole("button", { name: /Animate the 4 remaining · 320 credits/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("counts a stale clip as needing re-animating, not as missing", async () => {
+    await show(film({ shot_count: 4, stills_ready: 4, clips_ready: 4, clips_stale: 2 }));
+    expect(screen.getByText(/2 out of date since the still changed/)).toBeInTheDocument();
+    // Still rendereable: whether to pay 160 credits to redo them is the
+    // user's call, not a block (M6-D2's reasoning, one artifact along).
+    expect(screen.getByRole("button", { name: /Render the film/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Re-animate 2/ })).toBeInTheDocument();
+  });
+
+  it("animates only the shots that need it, one at a time", async () => {
+    await show(film({ shot_count: 3, stills_ready: 3, clips_ready: 1 }));
+    api.getShots.mockResolvedValue({
+      shots: [
+        { id: "s1", still: { asset_id: "a1" }, clip: { state: "fresh" } },
+        { id: "s2", still: { asset_id: "a2" }, clip: null },
+        { id: "s3", still: { asset_id: "a3" }, clip: { state: "stale" } },
+      ],
+    });
+    // Never settles, so the queue stops after the first dispatch — which is
+    // the point: one job in flight at a time (M6-D11).
+    api.generateClip.mockResolvedValue({ id: "job-1", kind: "generate_shot_clip", state: "queued" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Animate the 2 remaining/ }));
+    await waitFor(() => expect(api.generateClip).toHaveBeenCalledTimes(1));
+    expect(api.generateClip).toHaveBeenCalledWith("meld-1", "s2");
+  });
+
+  it("offers a download that saves rather than opens", async () => {
+    // The HTML download attribute is ignored cross-origin, so the link has
+    // to ask the server for the header (M6-D10).
+    await show(
+      film({
+        shot_count: 4,
+        stills_ready: 4,
+        clips_ready: 4,
+        final: {
+          id: "r2",
+          kind: "final",
+          state: "fresh",
+          asset_id: "asset-9",
+          duration_sec: "16.00",
+          resolution: "1920x1080",
+          updated_at: "2026-09-18T00:00:00Z",
+        },
+      }),
+    );
+    const link = screen.getByRole("link", { name: /Download the film/ });
+    expect(link).toHaveAttribute("href", expect.stringContaining("/assets/asset-9?download=true"));
+    expect(screen.getByText(/1920x1080/)).toBeInTheDocument();
+  });
+
+  it("shows the reason a final render was refused", async () => {
+    const { ApiError } = await import("@/lib/api");
+    api.renderFinal.mockRejectedValue(new ApiError(402, "This costs 60 credits and you have 12."));
+    await show(film({ shot_count: 4, stills_ready: 4, clips_ready: 4 }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Render the film/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("you have 12");
   });
 });

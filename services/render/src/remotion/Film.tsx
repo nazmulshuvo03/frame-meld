@@ -3,6 +3,7 @@ import {
   AbsoluteFill,
   Audio,
   Img,
+  OffthreadVideo,
   Sequence,
   Series,
   interpolate,
@@ -19,11 +20,14 @@ function gain(db: number): number {
   return Math.pow(10, db / 20);
 }
 
-/** One shot: its still, panned and zoomed, with its own audio over it.
+/** One shot: its clip if it has one, otherwise its still panned and zoomed,
+ *  with its own audio over it.
  *
- *  `clip_url` is deliberately not read. Preview animates the stills (§4.2);
- *  the clip branch arrives with M6, alongside the first clip that could
- *  exercise it.
+ *  That one conditional is the entire difference between a Preview and a
+ *  Final (§4.2), and it is why Preview was cheap to build: same composition,
+ *  same spec, same mix, different visual source. A clip carries its own
+ *  movement, so `motion` is ignored when one is present rather than applied
+ *  on top of it.
  */
 const Shot: React.FC<{ shot: SpecShot; fps: number }> = ({ shot, fps }) => {
   const frame = useCurrentFrame();
@@ -42,22 +46,28 @@ const Shot: React.FC<{ shot: SpecShot; fps: number }> = ({ shot, fps }) => {
 
   const zoom = at(fromZoom, toZoom);
 
+  // cover, so a source whose aspect ratio does not match the frame fills it
+  // rather than letterboxing inside a film the player already letterboxes.
+  const fill = { width: "100%", height: "100%", objectFit: "cover" } as const;
+
   return (
     <AbsoluteFill style={{ backgroundColor: "black", overflow: "hidden" }}>
-      <Img
-        src={shot.still_url}
-        style={{
-          width: "100%",
-          height: "100%",
-          // cover, so a still whose aspect ratio does not match the frame
-          // fills it rather than letterboxing inside a film that is
-          // already letterboxed by the player.
-          objectFit: "cover",
-          transform: `scale(${zoom}) translate(${at(fromX, toX) * 100}%, ${
-            at(fromY, toY) * 100
-          }%)`,
-        }}
-      />
+      {shot.clip_url ? (
+        // OffthreadVideo rather than Video: it extracts frames with ffmpeg
+        // instead of asking a headless browser to play a video in real time,
+        // which is both faster and the only one that renders deterministically.
+        <OffthreadVideo src={shot.clip_url} style={fill} />
+      ) : (
+        <Img
+          src={shot.still_url}
+          style={{
+            ...fill,
+            transform: `scale(${zoom}) translate(${at(fromX, toX) * 100}%, ${
+              at(fromY, toY) * 100
+            }%)`,
+          }}
+        />
+      )}
       {shot.audio.map((clip, index) => (
         <Sequence
           key={`${shot.id}-${index}`}

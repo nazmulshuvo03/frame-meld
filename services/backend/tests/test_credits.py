@@ -188,11 +188,26 @@ async def test_balances_are_per_user(db):
 def test_every_billable_job_kind_has_a_price():
     """A kind reaching the quote path with no entry would either crash at
     request time or, worse, be quoted as free."""
-    for kind in (JobKind.GENERATE_CHARACTERS, JobKind.GENERATE_CHARACTER_IMAGE):
+    for kind in (
+        JobKind.GENERATE_CHARACTERS,
+        JobKind.GENERATE_CHARACTER_IMAGE,
+        JobKind.MAP_SHOT_CHARACTERS,
+        JobKind.GENERATE_SHOT_IMAGE,
+        JobKind.GENERATE_SPEECH,
+        JobKind.GENERATE_MUSIC,
+        JobKind.GENERATE_SHOT_CLIP,
+        JobKind.RENDER_FINAL,
+    ):
         assert quote_for(kind) > 0
         assert kind in QUOTES
 
 
 def test_an_unpriced_kind_raises_rather_than_defaulting_to_free():
+    """RENDER_PREVIEW rather than an arbitrary kind: it is the one action
+    that is deliberately and permanently unpriced (M5-D7), so this asserts
+    the behaviour *and* the decision. It used to name RENDER_FINAL, which
+    M6 priced -- a free Final render would have been a revenue-report
+    discovery rather than a test failure, which is what this test is for.
+    """
     with pytest.raises(KeyError):
-        quote_for(JobKind.RENDER_FINAL)
+        quote_for(JobKind.RENDER_PREVIEW)

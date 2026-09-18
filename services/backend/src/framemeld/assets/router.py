@@ -23,6 +23,11 @@ Db = Annotated[DbSession, Depends(get_session)]
 #: because it is one user's artwork and no shared proxy may keep a copy.
 _CACHE_CONTROL = "private, max-age=31536000, immutable"
 
+#: Only the types this codebase actually stores. An unknown one gets no
+#: extension rather than a guessed one -- a file named `.bin` is more
+#: honest than a file named `.mp4` that will not play.
+_EXTENSIONS = {"video/mp4": ".mp4", "audio/wav": ".wav", "image/png": ".png"}
+
 
 def _not_found() -> HTTPException:
     """A fresh instance per raise -- see melds/router.py for why."""
@@ -36,6 +41,7 @@ async def get_asset(
     db: Db,
     exp: Annotated[str | None, Query()] = None,
     sig: Annotated[str | None, Query()] = None,
+    download: Annotated[bool, Query()] = False,
 ) -> Response:
     """One asset's bytes, to a signed-in owner or to a valid signature.
 
@@ -82,4 +88,18 @@ async def get_asset(
         logger.error("asset %s has no file at %s", asset.id, asset.storage_key)
         raise _not_found() from None
 
-    return Response(content=data, media_type=asset.mime, headers={"Cache-Control": _CACHE_CONTROL})
+    headers = {"Cache-Control": _CACHE_CONTROL}
+    if download:
+        # M6-D10. The HTML `download` attribute is ignored for cross-origin
+        # URLs, and web and api are different origins, so without this a
+        # "Download" link opens the film in a tab instead of saving it.
+        #
+        # The filename is built here from the asset's id and its media
+        # type, never from anything a user typed: a filename is a header
+        # value, and a header value containing a newline is a response
+        # splitting bug.
+        headers["Content-Disposition"] = (
+            f'attachment; filename="framemeld-{asset.id}{_EXTENSIONS.get(asset.mime, "")}"'
+        )
+
+    return Response(content=data, media_type=asset.mime, headers=headers)

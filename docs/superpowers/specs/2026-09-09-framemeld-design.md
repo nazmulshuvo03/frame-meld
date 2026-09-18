@@ -422,7 +422,7 @@ Chosen for cost and for licences that are safe to sell against.
 | Shot stills (character-consistent) | **Qwen-Image-Edit** (accepts reference images) | **Apache 2.0** | ~$0.02/img | FLUX.1 Kontext Pro (~$0.04), Seedream 4 Edit (up to 10 refs) |
 | Speech | **Kokoro-82M**, self-hosted (runs on CPU) | **Apache 2.0** | ~$0 | Chatterbox (MIT, voice cloning from ~5 s) → ElevenLabs |
 | Music / SFX | **ACE-Step 1.5** | **MIT**, explicit commercial grant | ~$0.008/track | Stable Audio 3 |
-| **Image-to-video** | **Wan 2.2** via a hosted API | **Apache 2.0** | ~$0.12–0.28/clip | LTX-2.5 (faster), Seedance 2.0 (cheaper, closed) |
+| **Image-to-video** | **Wan 2.2** via a hosted API | **Apache 2.0** | ~$0.12–0.28/clip | **Not built (M6-D9)** — `VideoProvider` and an ffmpeg-backed stub landed with M6; no hosted adapter exists. LTX-2.5 (faster), Seedance 2.0 (cheaper, closed) |
 
 ### 6.1 Licence traps (recorded so they are not rediscovered painfully)
 
@@ -461,7 +461,7 @@ billing) and a Gemini API key with **$10/month in Google Cloud credit** attached
 | Speech (`SpeechProvider`) | Gemini native TTS (`gemini-2.5-flash-preview-tts`) | Yes, rate-limited | **Adapter built (M4)**, never successfully called — `SPEECH_PROVIDER` defaults to `stub` (M4-D9) |
 | Character sheets / shot stills (`ImageProvider`) | `gemini-2.5-flash-image` | **No** — paid, ~$0.04/image | **Adapter built (M3)**, never successfully called — no billing on the key's project. `IMAGE_PROVIDER` defaults to `stub` |
 | Music (`MusicProvider`) | Lyria (clip or full-length) | **No** — paid, ~$0.04–0.08/track | **Not built (M5-D2)** — the protocol and a stub landed with M5; no Lyria adapter exists, because this key has no billing and two never-called paid adapters is already two |
-| Image-to-video (`VideoProvider`) | Veo 3.1 Lite, 720p | **No** — paid, $0.05/sec | Not built yet — arrives with M6. By far the dominant cost: ≈150s per 30-shot film ≈ $7.50, so the $10 credit funds roughly one full test film a month |
+| Image-to-video (`VideoProvider`) | Veo 3.1 Lite, 720p | **No** — paid, $0.05/sec | **Not built (M6-D9)** — the protocol and a stub landed with M6; no Veo adapter exists, for the same reason as Lyria. By far the dominant cost: ≈150s per 30-shot film ≈ $7.50, so the $10 credit funds roughly one full test film a month |
 
 **Why Gemini and not something else, for now:** the LLM swap is genuinely free and
 likely more reliable than OpenRouter's free roster for this project's specific need —
@@ -510,6 +510,13 @@ iterations. The $6 is spent once, when the user commits to the Final render.
 
 **Implied pricing:** ~$25–30 per finished film, or the credit equivalent
 (2,500–3,000 credits).
+
+> **Correction (M6, implemented).** The retail prices that follow from this table now exist
+> in `credits/pricing.py`: 80 credits a clip and 60 for the Final render (M6-D3), which put
+> a 30-shot, 5-character film at ≈2,974 credits — inside the band above. **These numbers
+> have never been checked against a real provider bill**, because no image, speech, music or
+> video model has been called; this table was verified on 2026-09-09 and §13 already says to
+> re-check it before wiring a provider up. Do that before charging anyone.
 
 ---
 
@@ -637,7 +644,34 @@ download.
 **Done when:** a user pays credits, waits, and downloads a real AI-generated MP4.
 **AI spend:** ~$6/Meld
 
+> **Correction (M6, implemented).** Three things:
+>
+> - **No Wan 2.2, and no video adapter at all** (M6-D9). `VideoProvider`, the job, the
+>   pricing, the hash chain, the Final composition and the download are all built and
+>   verified; the clips come from a stub that encodes a real MP4. Wan 2.2 and Veo 3.1 Lite
+>   are both billed per second, this project's key has no billing, and M5-D2 had already
+>   settled the rule: an adapter that cannot be called once is an adapter written against a
+>   guess. So the pipeline is complete and the model is a config line that has never been
+>   set — which makes the "real AI-generated" in *Done when* the one part of this milestone
+>   that is **not** met. AI spend was therefore $0, not ~$6.
+> - **A clip keys on the still's `content_hash`, not on the shot** (M6-D1). §4.1's graph
+>   already says `shot_image → shot_clip`; what M6 adds is that the projection beside it is
+>   `{motion_prompt, duration_sec}` — the two fields §3.3's `animate()` takes besides the
+>   picture. `motion_prompt` finally has a hash to belong to: M5-D5 kept it out of the
+>   Preview render's, because a Preview never reads it.
+> - **A Final is refused unless every shot has a clip** (M6-D7), before the hold — the same
+>   shape as M5-D4 and M4-D6. A clip from a *stale* still is allowed (M6-D2): §11's
+>   mitigation is that stills are approved before any clip is made, and a user animating a
+>   still they can see is that approval.
+
 **M5 is the first genuinely impressive demo, and it costs almost nothing to reach.**
+
+> **Status (2026-09-18).** M1–M6 are all implemented. Everything in §10 remains out of
+> scope, and the three generative models the spec picked for images, speech and video have
+> never been called from this account — every milestone from M3 on ships its adapter
+> boundary and its stub, and the boundary is the thing that makes "never called" a config
+> problem rather than a rewrite. See each milestone's decision record for what is verified
+> and what is not.
 
 ---
 

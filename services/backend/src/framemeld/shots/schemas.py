@@ -39,6 +39,21 @@ class AudioClipOut(BaseModel):
     updated_at: datetime
 
 
+class ShotClipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    state: str
+    asset_id: uuid.UUID | None
+    #: Which still this clip was animated from. Exposed for the same reason
+    #: a still exposes its reference sheets: "why does this shot look wrong"
+    #: is otherwise unanswerable from outside.
+    source_image_id: uuid.UUID | None
+    duration_sec: Decimal | None
+    credits_spent: int
+    updated_at: datetime
+
+
 class ShotMediaOut(ShotOut):
     """A shot, plus everything generated from it.
 
@@ -54,6 +69,7 @@ class ShotMediaOut(ShotOut):
     character_names: list[str]
     still: ShotImageOut | None
     audio: AudioClipOut | None
+    clip: ShotClipOut | None
 
 
 class ShotsOut(BaseModel):

@@ -28,6 +28,7 @@ from framemeld.models.shots import (
     AudioKind,
     AudioOwnerType,
     ShotCharacter,
+    ShotClip,
     ShotImage,
 )
 from framemeld.models.user import Session, User
@@ -62,6 +63,7 @@ __all__ = [
     "Session",
     "Shot",
     "ShotCharacter",
+    "ShotClip",
     "ShotImage",
     "Story",
     "User",

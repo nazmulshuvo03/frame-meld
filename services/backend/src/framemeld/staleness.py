@@ -19,6 +19,7 @@ from framemeld.models.shots import (
     AudioKind,
     AudioOwnerType,
     ShotCharacter,
+    ShotClip,
     ShotImage,
 )
 from framemeld.providers.speech.voices import DEFAULT_VOICE_ID
@@ -31,6 +32,8 @@ from framemeld.render.hashes import (
 from framemeld.script.hashes import script_input_hash
 from framemeld.shots.hashes import (
     audio_clip_input_hash,
+    motion_hash_for_shot,
+    shot_clip_input_hash,
     shot_image_input_hash,
     speech_hash_for_shot,
     visual_hash_for_shot,
@@ -55,6 +58,7 @@ class StalenessReport:
     #: the same way.
     stale_music: int
     stale_renders: int
+    stale_clips: int
     #: How many rows this call actually moved. Zero means the API can skip
     #: telling the user anything changed.
     changed: int
@@ -97,11 +101,11 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
         await db.execute(select(Meld).where(Meld.id == meld_id, Meld.deleted_at.is_(None)))
     ).scalar_one_or_none()
     if meld is None:
-        return StalenessReport(0, 0, 0, 0, 0, 0, 0, 0, 0)
+        return StalenessReport(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     story = (await db.execute(select(Story).where(Story.meld_id == meld_id))).scalar_one_or_none()
     if story is None:
-        return StalenessReport(0, 0, 0, 0, 0, 0, 0, 0, 0)
+        return StalenessReport(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     expected = script_input_hash(story.content_hash)
 
@@ -189,6 +193,31 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
         changed += _reconcile(
             still,
             shot_image_input_hash(visual_hash_for_shot(shot), current_refs.get(still.shot_id, [])),
+            now,
+        )
+
+    # Clips key on the bytes of the still they were animated from (M6-D1),
+    # not on the shot's visual hash: the model is handed the picture, so
+    # rewording an image prompt without redrawing must not re-animate
+    # anything, and redrawing must.
+    still_content = {still.shot_id: still.content_hash for still in stills}
+    videos = list(
+        (
+            await db.execute(
+                select(ShotClip)
+                .join(Shot, ShotClip.shot_id == Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .where(Scene.meld_id == meld_id)
+            )
+        ).scalars()
+    )
+    for video in videos:
+        shot = shots_by_id.get(video.shot_id)
+        if shot is None:
+            continue
+        changed += _reconcile(
+            video,
+            shot_clip_input_hash(motion_hash_for_shot(shot), still_content.get(video.shot_id, "")),
             now,
         )
 
@@ -285,5 +314,6 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
         stale_audio=sum(1 for clip in clips if clip.state is ArtifactState.STALE),
         stale_music=sum(1 for track in music if track.state is ArtifactState.STALE),
         stale_renders=sum(1 for r in renders if r.state is ArtifactState.STALE),
+        stale_clips=sum(1 for v in videos if v.state is ArtifactState.STALE),
         changed=changed,
     )
