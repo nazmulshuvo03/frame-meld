@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { RowControls } from "@/components/RowControls";
 import { StaleBadge } from "@/components/StaleBadge";
 import { CAMERA_ANGLES, DIALOGUE_KINDS, updateShot, type Shot } from "@/lib/api";
 import { useAutosave } from "@/lib/useAutosave";
@@ -12,10 +13,20 @@ export function ShotCard({
   meldId,
   shot: initial,
   onSaved,
+  onMove,
+  onDelete,
+  canMoveUp,
+  canMoveDown,
 }: {
   meldId: string;
   shot: Shot;
   onSaved: (shot: Shot) => void;
+  /** Structural edits are the parent's: reordering and deleting both change
+   *  the list this card sits in, so the card cannot own them. */
+  onMove: (delta: -1 | 1) => void;
+  onDelete: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }) {
   // The card owns its shot after mount. The parent's copy is the value it
   // loaded with; re-syncing from the parent on every refetch would yank
@@ -55,6 +66,16 @@ export function ShotCard({
           {status === "saved" && "Saved"}
           {status === "error" && <span className="text-danger">Couldn&apos;t save</span>}
         </span>
+        <RowControls
+          label={`shot ${shot.order_index + 1}`}
+          onMove={onMove}
+          onDelete={onDelete}
+          canMoveUp={canMoveUp}
+          canMoveDown={canMoveDown}
+          confirmMessage={`Delete shot ${
+            shot.order_index + 1
+          }? Its still and audio go with it, and credits already spent are not refunded.`}
+        />
       </div>
 
       <label className="mb-2 block">

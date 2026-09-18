@@ -15,10 +15,12 @@ from framemeld.credits.pricing import quote_for
 from framemeld.credits.service import hold
 from framemeld.jobs.service import JobDispatch, ensure_job
 from framemeld.melds.service import get_meld
-from framemeld.models.cast import Character, CharacterImage, CharacterImageKind
+from framemeld.models.cast import Character, CharacterImage, CharacterImageKind, CharacterRole
 from framemeld.models.job import Job, JobKind
-from framemeld.models.script import ArtifactState
+from framemeld.models.script import ArtifactState, Shot
 from framemeld.moderation.service import Blocked, check_and_record
+from framemeld.providers.speech.voices import voice_for_index
+from framemeld.script.hashes import content_hash_for_shot
 from framemeld.staleness import recompute_staleness
 
 
@@ -251,3 +253,116 @@ async def update_character(
     # the milestone's headline promise, silently not happening.
     await recompute_staleness(db, meld_id)
     return character
+
+
+async def add_character(db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID) -> Character | None:
+    """Append an empty character for the user to describe.
+
+    Its `input_hash` is the cast's current expectation rather than "" -- the
+    character was not extracted, but they belong to this cast, so
+    regenerating from the story marks them stale along with everyone else
+    instead of leaving them permanently and misleadingly out of date.
+
+    A voice is picked deterministically from the provider's list, the same
+    way extraction picks one: a character with no voice reads in the default
+    narrator's, which silently makes two people sound identical.
+    """
+    meld = await get_meld(db, user_id, meld_id)
+    if meld is None or meld.story is None:
+        return None
+
+    now = datetime.now(UTC)
+    existing = list(
+        (
+            await db.execute(
+                select(Character)
+                .where(Character.meld_id == meld_id)
+                .order_by(Character.order_index)
+            )
+        ).scalars()
+    )
+    character = Character(
+        meld_id=meld_id,
+        order_index=len(existing),
+        name="New character",
+        role=CharacterRole.SUPPORTING,
+        description="",
+        appearance="",
+        voice_id=voice_for_index(len(existing)),
+        input_hash=characters_input_hash(meld.story.content_hash),
+        state=ArtifactState.FRESH,
+        # Populated rather than left unloaded: the response serialiser
+        # reads `images` to find the canonical sheet, and a lazy load
+        # there happens outside the async context and raises
+        # MissingGreenlet. A new character genuinely has none.
+        images=[],
+        created_at=now,
+        updated_at=now,
+    )
+    character.content_hash = content_hash_for_character(character)
+    db.add(character)
+    meld.updated_at = now
+    await db.flush()
+    await recompute_staleness(db, meld_id)
+    return character
+
+
+async def delete_character(
+    db: DbSession, user_id: uuid.UUID, meld_id: uuid.UUID, character_id: uuid.UUID
+) -> bool | None:
+    """Remove a character, their sheet, and their place in every shot.
+
+    The `shot_characters` join rows cascade, which is exactly why spec 5.2
+    made it a real table rather than a uuid[]: a deleted character leaves no
+    dangling id inside a shot. The stills that referenced their sheet keep
+    it in `ref_character_image_ids` -- that column is a historical record of
+    what was actually drawn, not a live relation, and it has to survive to
+    explain a picture that exists.
+
+    Those stills then go stale on the next recompute, because the shot no
+    longer references a sheet they were drawn from. That is correct and it
+    is the point: the picture still contains a face the film no longer has.
+    """
+    meld = await get_meld(db, user_id, meld_id)
+    if meld is None:
+        return None
+    character = (
+        await db.execute(
+            select(Character).where(Character.id == character_id, Character.meld_id == meld_id)
+        )
+    ).scalar_one_or_none()
+    if character is None:
+        return None
+
+    # Shots this character was the speaker of would otherwise hold a
+    # dangling id: `speaker_character_id` is a real FK with no ON DELETE, so
+    # this is a constraint violation rather than a silent one -- but the
+    # right answer is still to clear it, because the line survives the
+    # person who said it and can be re-attributed.
+    for shot in (
+        await db.execute(select(Shot).where(Shot.speaker_character_id == character_id))
+    ).scalars():
+        shot.speaker_character_id = None
+        shot.content_hash = content_hash_for_shot(shot)
+
+    await db.delete(character)
+    await db.flush()
+
+    now = datetime.now(UTC)
+    for index, row in enumerate(
+        (
+            await db.execute(
+                select(Character)
+                .where(Character.meld_id == meld_id)
+                .order_by(Character.order_index)
+            )
+        ).scalars()
+    ):
+        if row.order_index != index:
+            row.order_index = index
+            row.updated_at = now
+
+    meld.updated_at = now
+    await db.flush()
+    await recompute_staleness(db, meld_id)
+    return True

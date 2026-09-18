@@ -8,7 +8,9 @@ import { CreditBalance } from "@/components/CreditBalance";
 import { QuoteButton } from "@/components/QuoteButton";
 import { useJobPolling } from "@/lib/useJobPolling";
 import {
+  addCharacter,
   ApiError,
+  deleteCharacter,
   generateCast,
   generateSheet,
   getBalance,
@@ -164,6 +166,23 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
   const castCredits = quotes?.generate_characters ?? FALLBACK_CAST_CREDITS;
   const sheetCredits = quotes?.generate_character_image ?? FALLBACK_SHEET_CREDITS;
 
+  // Every structural edit refetches rather than patching local state, for
+  // the reason the Script page gives: deleting a character renumbers the
+  // rest, clears them out of every shot, and marks the stills they appear in
+  // stale. Reproducing that here would be a second implementation of the
+  // staleness rules, kept in step by hand.
+  const structural = (run: () => Promise<unknown>) => () => {
+    setActionError(null);
+    void run().then(
+      () => void load(),
+      (err) => {
+        if (err instanceof ApiError) setActionError(err.message);
+        else setActionError("Couldn't save that change. Try again.");
+        void load();
+      },
+    );
+  };
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6">
@@ -244,9 +263,20 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
               voices={voices}
               onSaved={onSaved}
               onGenerateSheet={onGenerateSheet}
+              onDelete={structural(() => deleteCharacter(id, character.id))}
             />
           ))}
         </ol>
+      )}
+
+      {cast.characters.length > 0 && (
+        <button
+          type="button"
+          onClick={structural(() => addCharacter(id))}
+          className="mt-6 self-start rounded border border-subtle px-3 py-2 text-sm text-muted hover:bg-panel"
+        >
+          + Add a character
+        </button>
       )}
     </main>
   );

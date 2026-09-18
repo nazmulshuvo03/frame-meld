@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { RowControls } from "@/components/RowControls";
 import { ShotCard } from "@/components/ShotCard";
 import { StaleBadge } from "@/components/StaleBadge";
-import { updateScene, type SceneWithShots, type Shot } from "@/lib/api";
+import { addShot, deleteShot, moveShot, updateScene, type SceneWithShots, type Shot } from "@/lib/api";
 import { useAutosave } from "@/lib/useAutosave";
 
 const FIELD =
@@ -13,10 +14,23 @@ export function SceneCard({
   meldId,
   scene: initial,
   onSaved,
+  onMove,
+  onDelete,
+  onStructureChanged,
+  canMoveUp,
+  canMoveDown,
 }: {
   meldId: string;
   scene: SceneWithShots;
   onSaved: (scene: SceneWithShots) => void;
+  onMove: (delta: -1 | 1) => void;
+  onDelete: () => void;
+  /** Reload the whole script. Adding, deleting or moving a shot renumbers
+   *  its siblings and can mark work elsewhere stale, so the page refetches
+   *  rather than this card trying to reproduce the server's arithmetic. */
+  onStructureChanged: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }) {
   const [scene, setScene] = useState(initial);
 
@@ -50,6 +64,10 @@ export function SceneCard({
     [],
   );
 
+  const shotAction = (run: () => Promise<unknown>) => () => {
+    void run().then(onStructureChanged, onStructureChanged);
+  };
+
   return (
     <li>
       <div className="mb-2 flex items-center gap-2">
@@ -63,6 +81,16 @@ export function SceneCard({
         <span className="shrink-0 text-xs text-muted" role="status" aria-live="polite">
           {status === "saving" ? "Saving…" : status === "error" ? "Couldn't save" : ""}
         </span>
+        <RowControls
+          label={`scene ${scene.order_index + 1}`}
+          onMove={onMove}
+          onDelete={onDelete}
+          canMoveUp={canMoveUp}
+          canMoveDown={canMoveDown}
+          confirmMessage={`Delete this scene and its ${scene.shots.length} shot${
+            scene.shots.length === 1 ? "" : "s"
+          }? Everything generated from them goes too, and credits already spent are not refunded.`}
+        />
       </div>
 
       <div className="mb-2 grid grid-cols-2 gap-2">
@@ -89,10 +117,27 @@ export function SceneCard({
       />
 
       <ol className="flex flex-col gap-3">
-        {scene.shots.map((shot) => (
-          <ShotCard key={shot.id} meldId={meldId} shot={shot} onSaved={onShotSaved} />
+        {scene.shots.map((shot, index) => (
+          <ShotCard
+            key={shot.id}
+            meldId={meldId}
+            shot={shot}
+            onSaved={onShotSaved}
+            onMove={(delta) => shotAction(() => moveShot(meldId, shot.id, delta))()}
+            onDelete={shotAction(() => deleteShot(meldId, shot.id))}
+            canMoveUp={index > 0}
+            canMoveDown={index < scene.shots.length - 1}
+          />
         ))}
       </ol>
+
+      <button
+        type="button"
+        onClick={shotAction(() => addShot(meldId, scene.id))}
+        className="mt-3 rounded border border-subtle px-3 py-1.5 text-xs text-muted hover:bg-panel"
+      >
+        + Add a shot
+      </button>
     </li>
   );
 }

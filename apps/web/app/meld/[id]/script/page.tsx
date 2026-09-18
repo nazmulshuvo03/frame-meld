@@ -5,7 +5,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SceneCard } from "@/components/SceneCard";
 import { useJobPolling } from "@/lib/useJobPolling";
-import { ApiError, generateScript, getScript, type Job, type ScriptView } from "@/lib/api";
+import {
+  addScene,
+  ApiError,
+  deleteScene,
+  generateScript,
+  getScript,
+  type Job,
+  moveScene,
+  type ScriptView,
+} from "@/lib/api";
 
 export default function ScriptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -87,6 +96,22 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
   const busy = jobId !== null;
   const shotCount = script.scenes.reduce((total, scene) => total + scene.shots.length, 0);
 
+  // Every structural edit refetches rather than patching local state.
+  // Adding, deleting or moving renumbers siblings and can mark work stale
+  // two stages downstream; reproducing the server's arithmetic here would be
+  // a second implementation of the staleness rules, kept in step by hand.
+  const structural = (run: () => Promise<unknown>) => () => {
+    setActionError(null);
+    void run().then(
+      () => void load(),
+      (err) => {
+        if (err instanceof ApiError) setActionError(err.message);
+        else setActionError("Couldn't save that change. Try again.");
+        void load();
+      },
+    );
+  };
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6">
@@ -148,7 +173,7 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
         </p>
       ) : (
         <ol className="flex flex-col gap-8">
-          {script.scenes.map((scene) => (
+          {script.scenes.map((scene, index) => (
             <SceneCard
               key={scene.id}
               meldId={id}
@@ -163,9 +188,24 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
                       },
                 )
               }
+              onMove={(delta) => structural(() => moveScene(id, scene.id, delta))()}
+              onDelete={structural(() => deleteScene(id, scene.id))}
+              onStructureChanged={() => void load()}
+              canMoveUp={index > 0}
+              canMoveDown={index < script.scenes.length - 1}
             />
           ))}
         </ol>
+      )}
+
+      {script.scenes.length > 0 && (
+        <button
+          type="button"
+          onClick={structural(() => addScene(id))}
+          className="mt-6 self-start rounded border border-subtle px-3 py-2 text-sm text-muted hover:bg-panel"
+        >
+          + Add a scene
+        </button>
       )}
     </main>
   );

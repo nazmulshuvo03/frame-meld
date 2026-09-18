@@ -436,3 +436,42 @@ export const renderFinal = (meldId: string) =>
     // before it answers.
     timeoutMs: 60_000,
   });
+
+// --- Structure: add, delete, reorder -------------------------------------
+//
+// Spec §2 says the user is in control at every stage. Editing the text of
+// what the model produced is not control if a shot you do not want can only
+// be removed by regenerating the whole script.
+
+/** One step. The API rejects anything else rather than clamping it. */
+export type MoveDelta = -1 | 1;
+
+export const addScene = (meldId: string) =>
+  request<Scene>(`/melds/${meldId}/scenes`, { method: "POST" });
+
+export const deleteScene = (meldId: string, sceneId: string) =>
+  request<void>(`/melds/${meldId}/scenes/${sceneId}`, { method: "DELETE" });
+
+export const moveScene = (meldId: string, sceneId: string, delta: MoveDelta) =>
+  request<void>(`/melds/${meldId}/scenes/${sceneId}/move`, {
+    method: "POST",
+    body: JSON.stringify({ delta }),
+  });
+
+export const addShot = (meldId: string, sceneId: string) =>
+  request<Shot>(`/melds/${meldId}/scenes/${sceneId}/shots`, { method: "POST" });
+
+export const deleteShot = (meldId: string, shotId: string) =>
+  request<void>(`/melds/${meldId}/shots/${shotId}`, { method: "DELETE" });
+
+export const moveShot = (meldId: string, shotId: string, delta: MoveDelta) =>
+  request<void>(`/melds/${meldId}/shots/${shotId}/move`, {
+    method: "POST",
+    body: JSON.stringify({ delta }),
+  });
+
+export const addCharacter = (meldId: string) =>
+  request<Character>(`/melds/${meldId}/characters`, { method: "POST" });
+
+export const deleteCharacter = (meldId: string, characterId: string) =>
+  request<void>(`/melds/${meldId}/characters/${characterId}`, { method: "DELETE" });

@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -97,3 +98,14 @@ class ShotPatch(_RejectsExplicitNull, BaseModel):
     camera: CameraAngle | None = None
     dialogue_kind: DialogueKind | None = None
     speech_text: str | None = Field(default=None, max_length=4000)
+
+
+class MoveIn(BaseModel):
+    """One step up or down. Constrained to exactly +/-1 rather than any
+    integer: a caller sending 7 means something the endpoint does not do,
+    and silently clamping it would move the row somewhere they did not ask
+    for."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    delta: Literal[-1, 1]

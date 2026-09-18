@@ -180,3 +180,30 @@ async def patch_character(
         raise _not_found()
     await db.commit()
     return _as_character(character)
+
+
+@router.post("/characters", status_code=status.HTTP_201_CREATED, response_model=CharacterOut)
+async def add_character(meld_id: uuid.UUID, user: CurrentUser, db: Db) -> CharacterOut:
+    """Add somebody the extraction missed.
+
+    Spec section 2's "the user is in control at every stage": until now the
+    only way to add a character was to regenerate the cast, which replaces
+    rather than merges and takes every sheet already paid for with it.
+    """
+    character = await service.add_character(db, user.id, meld_id)
+    if character is None:
+        raise _not_found()
+    await db.commit()
+    # Through _as_character like every other route here: CharacterOut
+    # carries the canonical sheet, which is derived from the character's
+    # images rather than read off a column.
+    return _as_character(character)
+
+
+@router.delete("/characters/{character_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_character(
+    meld_id: uuid.UUID, character_id: uuid.UUID, user: CurrentUser, db: Db
+) -> None:
+    if await service.delete_character(db, user.id, meld_id, character_id) is None:
+        raise _not_found()
+    await db.commit()

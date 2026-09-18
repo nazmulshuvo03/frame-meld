@@ -10,6 +10,7 @@ from framemeld.jobs.queue import Queue, get_queue
 from framemeld.jobs.schemas import JobOut
 from framemeld.script import service
 from framemeld.script.schemas import (
+    MoveIn,
     SceneDetail,
     SceneOut,
     ScenePatch,
@@ -98,3 +99,74 @@ async def patch_shot(
         raise _not_found()
     await db.commit()
     return shot
+
+
+# --- structure: add, delete, move -----------------------------------------
+#
+# Spec section 2 says the user is in control at every stage, and until now
+# "control" stopped at editing the text of whatever the model produced: a
+# shot you did not want could only be removed by regenerating the script,
+# which destroys every sheet, still and clip paid for since.
+#
+# A move is one step rather than a target index or an ordered list of ids.
+# The UI offers up and down arrows, a swap is two assignments, and a reorder
+# payload is a validation problem -- duplicate ids, missing ids, ids from
+# another Meld -- for a feature nobody has asked for.
+
+
+@router.post("/scenes", status_code=status.HTTP_201_CREATED, response_model=SceneOut)
+async def add_scene(meld_id: uuid.UUID, user: CurrentUser, db: Db) -> SceneOut:
+    scene = await service.add_scene(db, user.id, meld_id)
+    if scene is None:
+        raise _not_found()
+    await db.commit()
+    return SceneOut.model_validate(scene)
+
+
+@router.delete("/scenes/{scene_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_scene(meld_id: uuid.UUID, scene_id: uuid.UUID, user: CurrentUser, db: Db) -> None:
+    try:
+        deleted = await service.delete_scene(db, user.id, meld_id, scene_id)
+    except service.LastScene as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason
+        ) from None
+    if deleted is None:
+        raise _not_found()
+    await db.commit()
+
+
+@router.post("/scenes/{scene_id}/move", status_code=status.HTTP_204_NO_CONTENT)
+async def move_scene(
+    meld_id: uuid.UUID, scene_id: uuid.UUID, body: MoveIn, user: CurrentUser, db: Db
+) -> None:
+    if await service.move_scene(db, user.id, meld_id, scene_id, body.delta) is None:
+        raise _not_found()
+    await db.commit()
+
+
+@router.post(
+    "/scenes/{scene_id}/shots", status_code=status.HTTP_201_CREATED, response_model=ShotOut
+)
+async def add_shot(meld_id: uuid.UUID, scene_id: uuid.UUID, user: CurrentUser, db: Db) -> ShotOut:
+    shot = await service.add_shot(db, user.id, meld_id, scene_id)
+    if shot is None:
+        raise _not_found()
+    await db.commit()
+    return ShotOut.model_validate(shot)
+
+
+@router.delete("/shots/{shot_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_shot(meld_id: uuid.UUID, shot_id: uuid.UUID, user: CurrentUser, db: Db) -> None:
+    if await service.delete_shot(db, user.id, meld_id, shot_id) is None:
+        raise _not_found()
+    await db.commit()
+
+
+@router.post("/shots/{shot_id}/move", status_code=status.HTTP_204_NO_CONTENT)
+async def move_shot(
+    meld_id: uuid.UUID, shot_id: uuid.UUID, body: MoveIn, user: CurrentUser, db: Db
+) -> None:
+    if await service.move_shot(db, user.id, meld_id, shot_id, body.delta) is None:
+        raise _not_found()
+    await db.commit()

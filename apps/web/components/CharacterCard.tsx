@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { QuoteButton } from "@/components/QuoteButton";
+import { RowControls } from "@/components/RowControls";
 import { StaleBadge } from "@/components/StaleBadge";
 import {
   CHARACTER_ROLES,
@@ -24,6 +25,7 @@ export function CharacterCard({
   voices,
   onSaved,
   onGenerateSheet,
+  onDelete,
 }: {
   meldId: string;
   character: Character;
@@ -33,6 +35,7 @@ export function CharacterCard({
   voices: string[];
   onSaved: (character: Character) => void;
   onGenerateSheet: (character: Character) => void;
+  onDelete: () => void;
 }) {
   // The card owns the *editable* fields after mount, exactly as ShotCard
   // owns its shot: re-syncing from the parent on every refetch would yank
@@ -79,6 +82,17 @@ export function CharacterCard({
           {status === "saved" && "Saved"}
           {status === "error" && <span className="text-danger">Couldn&apos;t save</span>}
         </span>
+        {/* No move controls: a character's order_index decides the order
+            their sheet is attached to an image call, so reordering the cast
+            would silently invalidate every still they appear in. That is a
+            real cost for a cosmetic change nobody has asked for. */}
+        <RowControls
+          label={character.name || `character ${character.order_index + 1}`}
+          onDelete={onDelete}
+          confirmMessage={`Delete ${
+            character.name || "this character"
+          }? Their sheet goes with it, they are removed from every shot, and the stills they appear in go out of date. Credits already spent are not refunded.`}
+        />
       </div>
 
       <div className="flex flex-col gap-4 sm:flex-row">
