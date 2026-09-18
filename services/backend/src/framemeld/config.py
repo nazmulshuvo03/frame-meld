@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     test_database_url: str
     session_cookie_name: str = "framemeld_session"
     session_ttl_days: int = 30
+    # A session cookie without Secure travels over plain HTTP, which is
+    # correct on http://localhost and a credential-in-the-clear anywhere
+    # else. Off by default because development is the common case and a
+    # Secure cookie is simply never stored by a browser on http://; any
+    # deployment behind TLS must set it.
+    session_cookie_secure: bool = False
 
     redis_url: str = "redis://localhost:6379/0"
 
@@ -80,6 +86,14 @@ class Settings(BaseSettings):
     # FastAPI's interactive docs enumerate every endpoint and schema to
     # anonymous callers. Fine locally, not on a public host.
     docs_enabled: bool = True
+
+    # Which peers uvicorn will believe X-Forwarded-For from. Empty means
+    # nobody, which is why the rate limiter keys on the socket address in
+    # development. Behind a proxy this must name it -- otherwise every
+    # request shares one limiter key and one attacker's budget covers
+    # everybody. Passed to uvicorn as --forwarded-allow-ips; it rewrites
+    # request.client, so no middleware of our own is involved.
+    forwarded_allow_ips: str = ""
 
     # Credits are granted, not bought, until Stripe arrives post-M6 (spec
     # section 10). 500 credits is $5 retail: roughly 40 character sheets,

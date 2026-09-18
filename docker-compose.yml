@@ -25,5 +25,77 @@ services:
       timeout: 5s
       retries: 10
 
+  # The four application services. They are in the `app` profile, so
+  # `docker compose up -d` still brings up only Postgres and Redis for local
+  # development against a conda environment — which is how this is mostly
+  # run. `docker compose --profile app up -d --build` brings up everything.
+  api:
+    profiles: ["app"]
+    build: ./services/backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://framemeld:framemeld@postgres:5432/framemeld
+      REDIS_URL: redis://redis:6379/0
+      RENDER_SERVICE_URL: http://render:8790
+      # What the render service uses to fetch assets, so it has to resolve
+      # inside the network -- not the address a browser uses.
+      PUBLIC_API_URL: http://api:8000
+      CORS_ORIGINS: http://localhost:3000
+      STORAGE_LOCAL_ROOT: /var/framemeld/assets
+      # Trust the compose network's proxy hop. In a real deployment this is
+      # the ingress's address; empty would mean the login limiter keys every
+      # request to the same bucket.
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - assets:/var/framemeld/assets
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  worker:
+    profiles: ["app"]
+    build: ./services/backend
+    # Same image as the api, different command -- they run the same code
+    # against the same database and differ only in what they do with it.
+    command: ["arq", "framemeld.worker.WorkerSettings"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://framemeld:framemeld@postgres:5432/framemeld
+      REDIS_URL: redis://redis:6379/0
+      RENDER_SERVICE_URL: http://render:8790
+      PUBLIC_API_URL: http://api:8000
+      STORAGE_LOCAL_ROOT: /var/framemeld/assets
+    volumes:
+      # The same volume as the api, because storage is still local disk
+      # (M5-D1). This is the line that stops being necessary the day the
+      # `Storage` protocol gets its S3 implementation.
+      - assets:/var/framemeld/assets
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  render:
+    profiles: ["app"]
+    build: ./services/render
+    ports:
+      - "8790:8790"
+
+  web:
+    profiles: ["app"]
+    build:
+      context: ./apps/web
+      args:
+        # Substituted into the client bundle at build time, so this is the
+        # address the *browser* uses and it cannot be changed afterwards
+        # with an environment variable.
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
 volumes:
   pgdata:
+  assets:

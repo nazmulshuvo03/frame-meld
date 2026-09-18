@@ -40,7 +40,10 @@ def _set_session_cookie(response: Response, raw_token: str) -> None:
         value=raw_token,
         httponly=True,
         samesite="lax",
-        secure=False,  # M1 runs on http://localhost; set True behind TLS
+        # SESSION_COOKIE_SECURE. False on http://localhost, where a
+        # Secure cookie would simply never be stored; True is required
+        # anywhere with TLS, or the session travels in the clear.
+        secure=settings.session_cookie_secure,
         max_age=settings.session_ttl_days * 24 * 60 * 60,
         path="/",
     )
@@ -55,9 +58,14 @@ def _login_keys(request: Request, email: str) -> tuple[str, str]:
     transport in tests, some proxies). Bucketing those together under one
     key is the safe direction — it over-limits rather than under-limits.
 
-    Note this trusts the socket address, not X-Forwarded-For. Behind a
-    proxy every request would share one key, so whoever adds the proxy
-    must also add a trusted-host/proxy-headers middleware.
+    This trusts the socket address. Behind a proxy that is the proxy's
+    address for everyone, so run uvicorn with --proxy-headers and
+    --forwarded-allow-ips set to the proxy (FORWARDED_ALLOW_IPS): uvicorn
+    then rewrites request.client from X-Forwarded-For and this keeps
+    working unchanged. Deliberately uvicorn's job rather than a middleware
+    of ours -- deciding which hop to believe is deployment configuration,
+    and a middleware that read the header unconditionally would let anyone
+    choose their own limiter key.
     """
     ip = request.client.host if request.client else "unknown"
     return f"rl:login:ip:{ip}", f"rl:login:email:{email.lower()}"
