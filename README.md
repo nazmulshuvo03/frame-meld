@@ -7,6 +7,7 @@ Story → Script → Cast → Shots → Film.
 
 - **Design spec:** [docs/superpowers/specs/2026-09-09-framemeld-design.md](docs/superpowers/specs/2026-09-09-framemeld-design.md)
 - **Plans:** [docs/superpowers/plans/](docs/superpowers/plans/)
+- **Where this is and what is left:** [docs/superpowers/STATUS.md](docs/superpowers/STATUS.md)
 
 ## Status
 
