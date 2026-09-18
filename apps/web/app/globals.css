@@ -44,6 +44,15 @@
   --warn-foreground: #78350f;
 
   --danger: #dc2626;
+
+  /* Work in progress, and the only colour on the page that moves.
+   *
+   * Cold on purpose. Amber already means "out of date" here, and a second
+   * warm accent would make "this is running" and "this is wrong" read as
+   * the same kind of event. This is the green of a waveform monitor, which
+   * is what the transport bar is imitating. */
+  --signal: #0d7d76;
+  --signal-faint: #d3efec;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -73,6 +82,11 @@
     --warn-foreground: #fcd34d;
 
     --danger: #f87171;
+
+    /* Lifted well off the dark background: on #0a0a0a the light version is
+     * a smudge, and this is the one element a user watches for a minute. */
+    --signal: #2ec4b6;
+    --signal-faint: #0d2b29;
   }
 }
 
@@ -92,6 +106,8 @@
   --color-warn-border: var(--warn-border);
   --color-warn-foreground: var(--warn-foreground);
   --color-danger: var(--danger);
+  --color-signal: var(--signal);
+  --color-signal-faint: var(--signal-faint);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -99,7 +115,21 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Geist, which layout.tsx has been loading since M1 and which this line
+   * used to throw away by naming Arial. */
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Anchored scrolling for the five stages: the transport bar is sticky, so
+ * a stage scrolled to the top of the viewport would sit underneath it. */
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 /* Form controls do not inherit the page's colours on their own, and a

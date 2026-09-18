@@ -1,82 +1,69 @@
 "use client";
 
-import { use, useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ApiError, getMeld, saveStory, type MeldDetail } from "@/lib/api";
-import { useAutosave, type SaveStatus } from "@/lib/useAutosave";
+import { use, useEffect, useState } from "react";
+import { CastStage } from "@/components/studio/CastStage";
+import { FilmStage } from "@/components/studio/FilmStage";
+import { ScriptStage } from "@/components/studio/ScriptStage";
+import { ShotsStage } from "@/components/studio/ShotsStage";
+import { StoryStage } from "@/components/studio/StoryStage";
+import { TransportBar, type StageId, type StageMark } from "@/components/studio/TransportBar";
+import { useStudio } from "@/lib/useStudio";
 
-const STATUS_TEXT: Record<SaveStatus, string> = {
-  idle: "",
-  unsaved: "Unsaved changes",
-  saving: "Saving…",
-  saved: "Saved",
-  error: "Couldn't save — check your connection",
-};
+const STAGE_IDS: StageId[] = ["story", "script", "cast", "shots", "film"];
 
-export default function MeldEditorPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const router = useRouter();
-
-  const [meld, setMeld] = useState<MeldDetail | null>(null);
-  const [text, setText] = useState("");
-  const [loaded, setLoaded] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [conflict, setConflict] = useState(false);
-  // The hash the server last confirmed. A ref, not state: changing it must
-  // not re-render, and onSave must see the newest value rather than one
-  // captured in a stale closure.
-  const contentHashRef = useRef<string | undefined>(undefined);
+/** Which stage the reader is currently in, for the nav's `aria-current`.
+ *
+ *  An IntersectionObserver rather than a scroll listener: it fires only
+ *  when a boundary is crossed rather than on every pixel, and it does not
+ *  need to know the sticky bar's height. The top band is discounted so a
+ *  stage counts as "current" once it is properly on screen rather than the
+ *  instant its first pixel appears under the bar.
+ */
+function useCurrentStage(ready: boolean): StageId {
+  const [current, setCurrent] = useState<StageId>("story");
 
   useEffect(() => {
-    getMeld(id)
-      .then((detail) => {
-        setMeld(detail);
-        setText(detail.story?.text ?? "");
-        contentHashRef.current = detail.story?.content_hash;
-        setLoaded(true);
-      })
-      .catch((err) => {
-        // Only a 401 means the session is gone. A 404 means this Meld is
-        // genuinely gone or not theirs, so bounce to the dashboard. Any
-        // other failure — the API unreachable, a 500 — must not masquerade
-        // as either, or a transient blip strands or misdirects a user whose
-        // Meld is fine. Mirrors /melds's refresh() classification.
-        if (err instanceof ApiError && err.status === 401) {
-          router.replace("/login");
-        } else if (err instanceof ApiError && err.status === 404) {
-          router.replace("/melds");
-        } else {
-          setLoadError("Couldn't load this Meld. Check your connection and reload.");
+    if (!ready) return;
+    const seen = new Map<StageId, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          seen.set(entry.target.id as StageId, entry.intersectionRatio);
         }
-      });
-  }, [id, router]);
-
-  const onSave = useCallback(
-    async (value: string) => {
-      try {
-        const saved = await saveStory(id, value, contentHashRef.current);
-        contentHashRef.current = saved.content_hash;
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 409) {
-          // Someone else — almost always this user's own second tab — saved
-          // in between. Stop editing rather than racing them: the textarea
-          // goes read-only and the banner explains why. Rethrown so
-          // useAutosave still reports "error" and keeps the close warning
-          // armed, because this text really is unsaved.
-          setConflict(true);
+        let best: StageId = "story";
+        let bestRatio = -1;
+        for (const id of STAGE_IDS) {
+          const ratio = seen.get(id) ?? 0;
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            best = id;
+          }
         }
-        throw err;
-      }
-    },
-    [id],
-  );
+        setCurrent(best);
+      },
+      { rootMargin: "-120px 0px -40% 0px", threshold: [0, 0.25, 0.5, 1] },
+    );
+    for (const id of STAGE_IDS) {
+      const element = document.getElementById(id);
+      if (element) observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, [ready]);
 
-  const { status } = useAutosave({ value: text, onSave, delayMs: 800, enabled: loaded });
+  return current;
+}
+
+export default function StudioPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const studio = useStudio(id);
+  const { meld, script, cast, shots, film, loadError, actionError } = studio;
+
+  const ready = meld !== null && script !== null && cast !== null && shots !== null && film !== null;
+  const current = useCurrentStage(ready);
 
   if (loadError) {
     return (
-      <main className="p-8">
+      <main className="mx-auto max-w-5xl p-8">
         <p role="alert" className="text-sm text-danger">
           {loadError}
         </p>
@@ -84,60 +71,76 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
     );
   }
 
-  if (!loaded || meld === null) {
-    return <main className="p-8 text-sm text-muted">Loading…</main>;
+  if (!ready) {
+    return <main className="mx-auto max-w-5xl p-8 text-sm text-muted">Loading…</main>;
   }
 
-  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const stages: StageMark[] = [
+    {
+      id: "story",
+      label: "Story",
+      done: meld.story?.text.trim() ? 1 : 0,
+      stale: 0,
+    },
+    {
+      id: "script",
+      label: "Script",
+      done: script.scenes.reduce((total, scene) => total + scene.shots.length, 0),
+      stale: script.stale_shots,
+    },
+    {
+      id: "cast",
+      label: "Cast",
+      done: cast.characters.length,
+      stale: cast.stale_characters + cast.stale_sheets,
+    },
+    {
+      id: "shots",
+      label: "Shots",
+      done: film.stills_ready,
+      stale: shots.stale_stills + shots.stale_audio,
+    },
+    {
+      id: "film",
+      label: "Film",
+      done: film.final?.asset_id ? 1 : film.preview?.asset_id ? 1 : 0,
+      stale:
+        (film.final?.state === "stale" ? 1 : 0) + (film.preview?.state === "stale" ? 1 : 0),
+    },
+  ];
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
-      <header className="mb-6 flex items-baseline justify-between">
-        <div>
-          <Link href="/melds" className="text-sm text-muted hover:underline">
-            ← My Melds
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold">{meld.title}</h1>
-        </div>
-        <span
-          className={`text-sm ${status === "error" ? "text-danger" : "text-muted"}`}
-          role="status"
-          aria-live="polite"
-        >
-          {STATUS_TEXT[status]}
-        </span>
-      </header>
-
-      {conflict && (
-        <div
-          role="alert"
-          className="mb-4 rounded border border-warn-border bg-warn p-4 text-sm text-warn-foreground"
-        >
-          <strong className="font-medium">This Meld was edited somewhere else.</strong> Your
-          changes here have not been saved. Copy anything you want to keep, then{" "}
-          <button onClick={() => window.location.reload()} className="underline">
-            reload
-          </button>{" "}
-          to get the latest version.
-        </div>
-      )}
-
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        disabled={conflict}
-        placeholder="Write your story here. Anything from a paragraph to a few pages — you'll turn it into a script next."
-        className="min-h-[60vh] flex-1 resize-none rounded border border-subtle p-6 font-serif text-lg leading-relaxed outline-none focus:border-edge-focus disabled:bg-panel disabled:text-muted"
+    <>
+      <TransportBar
+        title={meld.title}
+        durationSec={film.duration_sec}
+        shotCount={film.shot_count}
+        balance={studio.balance}
+        stages={stages}
+        current={current}
+        job={studio.job}
+        busy={studio.busy}
+        remaining={studio.remaining}
+        cancelError={studio.cancelError}
+        onStop={studio.stopEverything}
       />
 
-      <footer className="mt-4 flex items-center justify-between text-sm text-muted">
-        <span>
-          {wordCount} {wordCount === 1 ? "word" : "words"}
-        </span>
-        <Link href={`/meld/${id}/script`} className="text-muted hover:underline">
-          Next up: Script →
-        </Link>
-      </footer>
-    </main>
+      <main className="mx-auto w-full max-w-5xl flex-1 px-6">
+        {actionError && (
+          <p
+            role="alert"
+            className="mt-6 rounded border border-danger/40 bg-panel px-4 py-3 text-sm text-danger"
+          >
+            {actionError}
+          </p>
+        )}
+
+        <StoryStage meldId={id} meld={meld} />
+        <ScriptStage studio={studio} script={script} />
+        <CastStage studio={studio} cast={cast} />
+        <ShotsStage studio={studio} shots={shots} />
+        <FilmStage studio={studio} film={film} shots={shots} />
+      </main>
+    </>
   );
 }
