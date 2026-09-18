@@ -77,7 +77,7 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
   if (loadError) {
     return (
       <main className="p-8">
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {loadError}
         </p>
       </main>
@@ -85,7 +85,7 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
   }
 
   if (!loaded || meld === null) {
-    return <main className="p-8 text-sm text-neutral-500">Loading…</main>;
+    return <main className="p-8 text-sm text-muted">Loading…</main>;
   }
 
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
@@ -94,13 +94,13 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6 flex items-baseline justify-between">
         <div>
-          <Link href="/melds" className="text-sm text-neutral-500 hover:underline">
+          <Link href="/melds" className="text-sm text-muted hover:underline">
             ← My Melds
           </Link>
           <h1 className="mt-1 text-2xl font-semibold">{meld.title}</h1>
         </div>
         <span
-          className={`text-sm ${status === "error" ? "text-red-600" : "text-neutral-500"}`}
+          className={`text-sm ${status === "error" ? "text-danger" : "text-muted"}`}
           role="status"
           aria-live="polite"
         >
@@ -111,7 +111,7 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
       {conflict && (
         <div
           role="alert"
-          className="mb-4 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+          className="mb-4 rounded border border-warn-border bg-warn p-4 text-sm text-warn-foreground"
         >
           <strong className="font-medium">This Meld was edited somewhere else.</strong> Your
           changes here have not been saved. Copy anything you want to keep, then{" "}
@@ -127,14 +127,14 @@ export default function MeldEditorPage({ params }: { params: Promise<{ id: strin
         onChange={(e) => setText(e.target.value)}
         disabled={conflict}
         placeholder="Write your story here. Anything from a paragraph to a few pages — you'll turn it into a script next."
-        className="min-h-[60vh] flex-1 resize-none rounded border border-neutral-200 p-6 font-serif text-lg leading-relaxed outline-none focus:border-neutral-400 disabled:bg-neutral-50 disabled:text-neutral-500"
+        className="min-h-[60vh] flex-1 resize-none rounded border border-subtle p-6 font-serif text-lg leading-relaxed outline-none focus:border-edge-focus disabled:bg-panel disabled:text-muted"
       />
 
-      <footer className="mt-4 flex items-center justify-between text-sm text-neutral-500">
+      <footer className="mt-4 flex items-center justify-between text-sm text-muted">
         <span>
           {wordCount} {wordCount === 1 ? "word" : "words"}
         </span>
-        <Link href={`/meld/${id}/script`} className="text-neutral-500 hover:underline">
+        <Link href={`/meld/${id}/script`} className="text-muted hover:underline">
           Next up: Script →
         </Link>
       </footer>

@@ -13,5 +13,5 @@ export default function Home() {
       .catch(() => router.replace("/login"));
   }, [router]);
 
-  return <main className="p-8 text-sm text-neutral-500">Loading…</main>;
+  return <main className="p-8 text-sm text-muted">Loading…</main>;
 }

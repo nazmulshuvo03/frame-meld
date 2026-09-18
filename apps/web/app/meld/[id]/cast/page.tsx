@@ -149,7 +149,7 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
   if (loadError) {
     return (
       <main className="p-8">
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {loadError}
         </p>
       </main>
@@ -157,7 +157,7 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
   }
 
   if (cast === null) {
-    return <main className="p-8 text-sm text-neutral-500">Loading…</main>;
+    return <main className="p-8 text-sm text-muted">Loading…</main>;
   }
 
   const busy = jobId !== null;
@@ -168,10 +168,10 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6">
         <div className="flex items-baseline justify-between">
-          <Link href={`/meld/${id}/script`} className="text-sm text-neutral-500 hover:underline">
+          <Link href={`/meld/${id}/script`} className="text-sm text-muted hover:underline">
             ← Script
           </Link>
-          <Link href={`/meld/${id}/shots`} className="text-sm text-neutral-500 hover:underline">
+          <Link href={`/meld/${id}/shots`} className="text-sm text-muted hover:underline">
             Next up: Shots →
           </Link>
         </div>
@@ -190,7 +190,7 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
           </div>
         </div>
         {cast.characters.length > 0 && (
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-muted">
             {cast.characters.length}{" "}
             {cast.characters.length === 1 ? "character" : "characters"}
           </p>
@@ -200,7 +200,7 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
       {cast.stale_characters > 0 && (
         <div
           role="status"
-          className="mb-4 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+          className="mb-4 rounded border border-warn-border bg-warn p-4 text-sm text-warn-foreground"
         >
           <strong className="font-medium">Your story changed.</strong>{" "}
           {cast.stale_characters}{" "}
@@ -213,7 +213,7 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
       {cast.stale_sheets > 0 && (
         <div
           role="status"
-          className="mb-6 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+          className="mb-6 rounded border border-warn-border bg-warn p-4 text-sm text-warn-foreground"
         >
           <strong className="font-medium">A character changed.</strong> {cast.stale_sheets}{" "}
           {cast.stale_sheets === 1 ? "sheet is" : "sheets are"} out of date. Nothing has been
@@ -222,13 +222,13 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
       )}
 
       {actionError && (
-        <p role="alert" className="mb-6 text-sm text-red-600">
+        <p role="alert" className="mb-6 text-sm text-danger">
           {actionError}
         </p>
       )}
 
       {cast.characters.length === 0 ? (
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-muted">
           No cast yet. Generate one from your story to get characters you can edit and draw.
         </p>
       ) : (

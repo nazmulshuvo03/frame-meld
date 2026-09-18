@@ -116,31 +116,31 @@ export default function MeldsPage() {
           <button
             onClick={onNewMeld}
             disabled={creating}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+            className="rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
           >
             New Meld
           </button>
-          <button onClick={onLogout} className="text-sm text-neutral-600 hover:underline">
+          <button onClick={onLogout} className="text-sm text-body hover:underline">
             Log out
           </button>
         </div>
       </header>
 
       {loadError && (
-        <p role="alert" className="mb-6 text-sm text-red-600">
+        <p role="alert" className="mb-6 text-sm text-danger">
           {loadError}
         </p>
       )}
 
-      {melds === null && !loadError && <p className="text-sm text-neutral-500">Loading…</p>}
+      {melds === null && !loadError && <p className="text-sm text-muted">Loading…</p>}
 
       {melds !== null && melds.length === 0 && (
-        <div className="rounded border border-dashed border-neutral-300 p-12 text-center">
-          <p className="mb-4 text-neutral-600">You haven&apos;t started a Meld yet.</p>
+        <div className="rounded border border-dashed border-strong p-12 text-center">
+          <p className="mb-4 text-body">You haven&apos;t started a Meld yet.</p>
           <button
             onClick={onNewMeld}
             disabled={creating}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+            className="rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
           >
             Write your first story
           </button>

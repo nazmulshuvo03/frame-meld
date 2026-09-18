@@ -137,7 +137,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
   if (loadError) {
     return (
       <main className="p-8">
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {loadError}
         </p>
       </main>
@@ -145,7 +145,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
   }
 
   if (film === null) {
-    return <main className="p-8 text-sm text-neutral-500">Loading…</main>;
+    return <main className="p-8 text-sm text-muted">Loading…</main>;
   }
 
   const busy = jobId !== null || remaining > 0;
@@ -176,7 +176,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6">
-        <Link href={`/meld/${id}/shots`} className="text-sm text-neutral-500 hover:underline">
+        <Link href={`/meld/${id}/shots`} className="text-sm text-muted hover:underline">
           ← Shots
         </Link>
         <div className="mt-1 flex flex-wrap items-baseline justify-between gap-4">
@@ -184,7 +184,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
           <CreditBalance balance={balance} />
         </div>
         {film.shot_count > 0 && (
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-muted">
             {film.shot_count} {film.shot_count === 1 ? "shot" : "shots"} ·{" "}
             {film.stills_ready} drawn · {film.duration_sec.toFixed(1)}s
           </p>
@@ -192,18 +192,18 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
       </header>
 
       {actionError && (
-        <p role="alert" className="mb-6 text-sm text-red-600">
+        <p role="alert" className="mb-6 text-sm text-danger">
           {actionError}
         </p>
       )}
 
       {film.shot_count === 0 ? (
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-muted">
           No shots yet. Generate a script first, then draw the stills.
         </p>
       ) : (
         <div className="flex flex-col gap-8">
-          <section className="rounded border border-neutral-200 p-4">
+          <section className="rounded border border-subtle p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2 className="font-medium">
                 Preview
@@ -212,7 +212,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
               <button
                 onClick={() => void start(() => renderPreview(id))}
                 disabled={busy || !ready}
-                className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+                className="rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
               >
                 {busy && job?.kind === "render_preview"
                   ? job.state === "running"
@@ -224,14 +224,14 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
               </button>
             </div>
 
-            <p className="mt-2 text-sm text-neutral-600">
+            <p className="mt-2 text-sm text-body">
               A full draft of the film — your stills animated, with the narration and the
               score over them. It costs nothing, so watch it as often as you like before
               spending anything on the real thing.
             </p>
 
             {!ready && (
-              <p role="status" className="mt-3 text-sm text-amber-900">
+              <p role="status" className="mt-3 text-sm text-warn-foreground">
                 {undrawn} of {film.shot_count} shots still have no still. Draw them on the{" "}
                 <Link href={`/meld/${id}/shots`} className="underline">
                   Shots page
@@ -251,7 +251,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
                   controls
                   className="w-full rounded bg-black"
                 />
-                <p className="mt-2 text-xs text-neutral-500">
+                <p className="mt-2 text-xs text-muted">
                   {preview.resolution} · {preview.duration_sec ?? "?"}s
                   {preview.state === "stale" &&
                     " · the film has changed since this was made"}
@@ -260,7 +260,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
             )}
           </section>
 
-          <section className="rounded border border-neutral-200 p-4">
+          <section className="rounded border border-subtle p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2 className="font-medium">
                 Music
@@ -276,7 +276,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
               />
             </div>
 
-            <p className="mt-2 text-sm text-neutral-600">
+            <p className="mt-2 text-sm text-body">
               One instrumental track across the whole film, written from your title and scene
               headings and mixed under the narration. Optional — a preview renders without it.
             </p>
@@ -289,20 +289,20 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
                   controls
                   className="w-full"
                 />
-                <p className="mt-2 text-xs text-neutral-500">
+                <p className="mt-2 text-xs text-muted">
                   {film.music.duration_sec ?? "?"}s · {film.music.credits_spent} credits
                 </p>
-                <p className="mt-2 text-xs text-neutral-500">{film.music.text}</p>
+                <p className="mt-2 text-xs text-muted">{film.music.text}</p>
               </div>
             )}
           </section>
 
-          <section className="rounded border border-neutral-200 p-4">
+          <section className="rounded border border-subtle p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2 className="font-medium">Clips</h2>
               <div className="flex items-center gap-3">
                 {remaining > 0 && (
-                  <span role="status" className="text-sm text-neutral-500">
+                  <span role="status" className="text-sm text-muted">
                     {remaining} left…
                   </span>
                 )}
@@ -323,18 +323,18 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
               </div>
             </div>
 
-            <p className="mt-2 text-sm text-neutral-600">
+            <p className="mt-2 text-sm text-body">
               Each still animated into a real video clip. This is the expensive part —{" "}
               {clipCredits} credits a shot — so watch the preview first and be happy with
               the pacing before you spend it.
             </p>
 
-            <p className="mt-3 text-sm text-neutral-500">
+            <p className="mt-3 text-sm text-muted">
               {film.clips_ready} of {film.shot_count} shots animated
               {film.clips_stale > 0 && (
                 <>
                   {" · "}
-                  <span className="text-amber-900">
+                  <span className="text-warn-foreground">
                     {film.clips_stale} out of date since the still changed
                   </span>
                 </>
@@ -342,7 +342,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
             </p>
           </section>
 
-          <section className="rounded border border-neutral-200 p-4">
+          <section className="rounded border border-subtle p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2 className="font-medium">
                 Final
@@ -363,12 +363,12 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
               />
             </div>
 
-            <p className="mt-2 text-sm text-neutral-600">
+            <p className="mt-2 text-sm text-body">
               The deliverable: your clips, cut together at 1920×1080 with the full audio.
             </p>
 
             {!animated && (
-              <p role="status" className="mt-3 text-sm text-amber-900">
+              <p role="status" className="mt-3 text-sm text-warn-foreground">
                 {unanimated} of {film.shot_count} shots have no clip yet. Animate them
                 first — a final render with gaps in it is not the film.
               </p>
@@ -383,14 +383,14 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
                   className="w-full rounded bg-black"
                 />
                 <div className="mt-2 flex flex-wrap items-baseline justify-between gap-3">
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-xs text-muted">
                     {final.resolution} · {final.duration_sec ?? "?"}s
                     {final.state === "stale" &&
                       " · the film has changed since this was made"}
                   </p>
                   <a
                     href={assetDownloadUrl(final.asset_id)}
-                    className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50"
+                    className="rounded border border-strong px-3 py-1.5 text-sm hover:bg-panel"
                   >
                     Download the film
                   </a>

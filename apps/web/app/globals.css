@@ -1,26 +1,127 @@
 @import "tailwindcss";
 
+/* A small semantic palette, defined once and flipped by the OS theme.
+ *
+ * Every page used to reach for `text-neutral-500` / `bg-neutral-50` /
+ * `border-neutral-200` directly, which is fine on white and renders
+ * dark-on-dark the moment the body goes to #0a0a0a. The alternative to this
+ * file was a `dark:` variant on roughly 150 class usages — five times the
+ * diff, and five times the places for one of them to be forgotten.
+ *
+ * Nine tokens, each named for what it *means* rather than how dark it is, so
+ * a component never has to know which theme it is in.
+ */
 :root {
   --background: #ffffff;
   --foreground: #171717;
-}
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Body copy that is not the primary text: captions, counts, hints. */
+  --muted: #737373;
+  /* Quieter still — timestamps, disabled affordances. */
+  --faint: #a3a3a3;
+  /* Secondary paragraphs that must stay comfortably readable. */
+  --body: #525252;
+
+  /* A card or section edge. Decorative: it groups content that is already
+   * grouped by position, so it is held to being perceptible rather than to
+   * WCAG 1.4.11's 3:1, which governs UI components you have to find. */
+  --subtle: #e5e5e5;
+  /* An input's border, which *is* a UI component's only boundary here, so
+   * it meets 3:1 (3.03 on white) rather than looking tasteful at 1.5. */
+  --strong: #949494;
+  /* And its focus indicator, held higher again so the change is obvious. */
+  --edge-focus: #767676;
+  /* Panels sitting on the page background. */
+  --panel: #fafafa;
+
+  /* Primary buttons. Inverted against the page, so it flips with it. */
+  --accent: #171717;
+  --accent-foreground: #ffffff;
+
+  /* "Out of date", and every other thing-you-should-look-at. */
+  --warn: #fffbeb;
+  --warn-border: #fde68a;
+  --warn-foreground: #78350f;
+
+  --danger: #dc2626;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --muted: #a3a3a3;
+    --faint: #737373;
+    --body: #d4d4d4;
+
+    --subtle: #262626;
+    /* 3.01 and 4.55 on #0a0a0a — the same two rules as above. */
+    --strong: #5d5d5d;
+    --edge-focus: #797979;
+    --panel: #171717;
+
+    /* Inverted again: a near-black button on a near-black page is a button
+     * nobody can see. */
+    --accent: #ededed;
+    --accent-foreground: #0a0a0a;
+
+    /* Amber at a dark-mode weight: a wash rather than a highlighter, with
+     * the text light enough to read on it. */
+    --warn: #291a06;
+    --warn-border: #5c3d0a;
+    --warn-foreground: #fcd34d;
+
+    --danger: #f87171;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-body: var(--body);
+  --color-subtle: var(--subtle);
+  --color-strong: var(--strong);
+  --color-edge-focus: var(--edge-focus);
+  --color-panel: var(--panel);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-warn: var(--warn);
+  --color-warn-border: var(--warn-border);
+  --color-warn-foreground: var(--warn-foreground);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Form controls do not inherit the page's colours on their own, and a
+ * textarea left alone renders white-on-white in dark mode with a caret
+ * nobody can find. Set here rather than per component: the autosaving story
+ * editor, every inline field on the Script and Cast pages and the login form
+ * all need exactly this, and none of them should have to remember it.
+ */
+input,
+textarea,
+select {
+  background-color: transparent;
+  color: inherit;
+}
+
+/* A native select's dropdown is painted by the OS from these two, not from
+ * the page, so its options stay unreadable unless they are given a real
+ * background rather than `transparent`. */
+select {
+  background-color: var(--background);
+}
+
+::placeholder {
+  color: var(--faint);
 }

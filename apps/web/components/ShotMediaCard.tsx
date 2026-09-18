@@ -31,10 +31,10 @@ export function ShotMediaCard({
   const speakable = shot.dialogue_kind !== "none" && shot.speech_text.trim() !== "";
 
   return (
-    <li className="rounded border border-neutral-200 p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+    <li className="rounded border border-subtle p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
         <span>Shot {shot.order_index + 1}</span>
-        <span className="rounded bg-neutral-100 px-2 py-0.5">{shot.camera}</span>
+        <span className="rounded bg-panel px-2 py-0.5">{shot.camera}</span>
         {shot.character_names.length > 0 ? (
           <span>{shot.character_names.join(", ")}</span>
         ) : (
@@ -54,26 +54,26 @@ export function ShotMediaCard({
             <img
               src={assetUrl(still.asset_id)}
               alt={`Still for shot ${shot.order_index + 1}`}
-              className="w-full rounded border border-neutral-200 bg-neutral-50"
+              className="w-full rounded border border-subtle bg-panel"
             />
           ) : (
-            <div className="flex aspect-video w-full items-center justify-center rounded border border-dashed border-neutral-200 text-xs text-neutral-400">
+            <div className="flex aspect-video w-full items-center justify-center rounded border border-dashed border-subtle text-xs text-faint">
               {drawing ? "Drawing…" : still?.state === "failed" ? "Failed" : "No still yet"}
             </div>
           )}
         </div>
 
         <div className="flex flex-1 flex-col gap-3">
-          <p className="text-sm text-neutral-700">{shot.image_prompt}</p>
+          <p className="text-sm text-body">{shot.image_prompt}</p>
 
           {speakable && (
-            <div className="rounded border border-neutral-100 bg-neutral-50 p-3">
-              <p className="mb-2 text-xs text-neutral-500">
+            <div className="rounded border border-subtle bg-panel p-3">
+              <p className="mb-2 text-xs text-muted">
                 {shot.dialogue_kind.replace("_", " ")}
                 {audio?.voice_id ? ` · ${audio.voice_id}` : ""}
                 {audio?.duration_sec ? ` · ${audio.duration_sec}s` : ""}
               </p>
-              <p className="mb-2 text-sm text-neutral-700">{shot.speech_text}</p>
+              <p className="mb-2 text-sm text-body">{shot.speech_text}</p>
               {audio?.state === "stale" && <StaleBadge className="mb-2 inline-block" />}
               {audio?.asset_id ? (
                 // A plain <audio controls>: the browser already has a
@@ -86,7 +86,7 @@ export function ShotMediaCard({
                   aria-label={`Audio for shot ${shot.order_index + 1}`}
                 />
               ) : (
-                <p className="text-xs text-neutral-400">
+                <p className="text-xs text-faint">
                   {recording ? "Recording…" : audio?.state === "failed" ? "Failed" : "No audio yet"}
                 </p>
               )}

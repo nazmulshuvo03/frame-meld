@@ -13,7 +13,7 @@ import {
 import { useAutosave } from "@/lib/useAutosave";
 
 const FIELD =
-  "w-full rounded border border-neutral-200 p-2 text-sm outline-none focus:border-neutral-400";
+  "w-full rounded border border-subtle p-2 text-sm outline-none focus:border-edge-focus";
 
 export function CharacterCard({
   meldId,
@@ -70,21 +70,21 @@ export function CharacterCard({
   const drawing = sheet?.state === "generating";
 
   return (
-    <li className="rounded border border-neutral-200 p-4">
-      <div className="mb-3 flex items-center gap-2 text-xs text-neutral-500">
+    <li className="rounded border border-subtle p-4">
+      <div className="mb-3 flex items-center gap-2 text-xs text-muted">
         <span>Character {character.order_index + 1}</span>
         {character.state === "stale" && <StaleBadge />}
         <span className="ml-auto" role="status" aria-live="polite">
           {status === "saving" && "Saving…"}
           {status === "saved" && "Saved"}
-          {status === "error" && <span className="text-red-600">Couldn&apos;t save</span>}
+          {status === "error" && <span className="text-danger">Couldn&apos;t save</span>}
         </span>
       </div>
 
       <div className="flex flex-col gap-4 sm:flex-row">
         <div className="flex-1">
           <label className="mb-2 block">
-            <span className="mb-1 block text-xs text-neutral-500">Name</span>
+            <span className="mb-1 block text-xs text-muted">Name</span>
             <input
               value={character.name}
               onChange={(e) => edit("name", e.target.value)}
@@ -93,7 +93,7 @@ export function CharacterCard({
           </label>
 
           <label className="mb-2 block">
-            <span className="mb-1 block text-xs text-neutral-500">Role</span>
+            <span className="mb-1 block text-xs text-muted">Role</span>
             <select
               value={character.role}
               onChange={(e) =>
@@ -112,7 +112,7 @@ export function CharacterCard({
           </label>
 
           <label className="mb-2 block">
-            <span className="mb-1 block text-xs text-neutral-500">
+            <span className="mb-1 block text-xs text-muted">
               Who they are — their part in the story
             </span>
             <textarea
@@ -124,7 +124,7 @@ export function CharacterCard({
           </label>
 
           <label className="mb-2 block">
-            <span className="mb-1 block text-xs text-neutral-500">
+            <span className="mb-1 block text-xs text-muted">
               Voice — reads this character&apos;s lines. Changing it marks their audio out of
               date, and leaves their sheet alone.
             </span>
@@ -149,7 +149,7 @@ export function CharacterCard({
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-xs text-neutral-500">
+            <span className="mb-1 block text-xs text-muted">
               Appearance — <strong className="font-medium">this is what gets drawn.</strong>{" "}
               Describe only what a camera would see; the image model has not read your story.
             </span>
@@ -163,7 +163,7 @@ export function CharacterCard({
         </div>
 
         <div className="flex w-full flex-col items-end gap-2 sm:w-56">
-          <div className="flex w-full items-center justify-end gap-2 text-xs text-neutral-500">
+          <div className="flex w-full items-center justify-end gap-2 text-xs text-muted">
             {/* A second badge, because the two mean different things: the
                 character can be out of date with the story while their
                 artwork is out of date with the character. */}
@@ -177,10 +177,10 @@ export function CharacterCard({
             <img
               src={assetUrl(sheet.asset_id)}
               alt={`Reference sheet for ${character.name}`}
-              className="w-full rounded border border-neutral-200 bg-neutral-50"
+              className="w-full rounded border border-subtle bg-panel"
             />
           ) : (
-            <div className="flex aspect-square w-full items-center justify-center rounded border border-dashed border-neutral-200 text-xs text-neutral-400">
+            <div className="flex aspect-square w-full items-center justify-center rounded border border-dashed border-subtle text-xs text-faint">
               {drawing ? "Drawing…" : "No sheet yet"}
             </div>
           )}

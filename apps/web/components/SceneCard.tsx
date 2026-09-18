@@ -7,7 +7,7 @@ import { updateScene, type SceneWithShots, type Shot } from "@/lib/api";
 import { useAutosave } from "@/lib/useAutosave";
 
 const FIELD =
-  "w-full rounded border border-neutral-200 p-2 text-sm outline-none focus:border-neutral-400";
+  "w-full rounded border border-subtle p-2 text-sm outline-none focus:border-edge-focus";
 
 export function SceneCard({
   meldId,
@@ -60,7 +60,7 @@ export function SceneCard({
           className={`${FIELD} font-mono font-semibold uppercase`}
         />
         {scene.state === "stale" && <StaleBadge />}
-        <span className="shrink-0 text-xs text-neutral-500" role="status" aria-live="polite">
+        <span className="shrink-0 text-xs text-muted" role="status" aria-live="polite">
           {status === "saving" ? "Saving…" : status === "error" ? "Couldn't save" : ""}
         </span>
       </div>

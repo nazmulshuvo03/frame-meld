@@ -153,7 +153,7 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
   if (loadError) {
     return (
       <main className="p-8">
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {loadError}
         </p>
       </main>
@@ -161,7 +161,7 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
   }
 
   if (shots === null) {
-    return <main className="p-8 text-sm text-neutral-500">Loading…</main>;
+    return <main className="p-8 text-sm text-muted">Loading…</main>;
   }
 
   const busy = jobId !== null || remaining > 0;
@@ -182,10 +182,10 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6">
         <div className="flex items-baseline justify-between">
-          <Link href={`/meld/${id}/cast`} className="text-sm text-neutral-500 hover:underline">
+          <Link href={`/meld/${id}/cast`} className="text-sm text-muted hover:underline">
             ← Cast
           </Link>
-          <Link href={`/meld/${id}/film`} className="text-sm text-neutral-500 hover:underline">
+          <Link href={`/meld/${id}/film`} className="text-sm text-muted hover:underline">
             Next up: Film →
           </Link>
         </div>
@@ -204,7 +204,7 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
           </div>
         </div>
         {shots.shots.length > 0 && (
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-muted">
             {shots.shots.length} {shots.shots.length === 1 ? "shot" : "shots"} ·{" "}
             {shots.shots.length - missing.length} drawn
           </p>
@@ -214,7 +214,7 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
       {shots.shots.length > 0 && !shots.cast_into_shots && (
         <div
           role="status"
-          className="mb-6 rounded border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700"
+          className="mb-6 rounded border border-subtle bg-panel p-4 text-sm text-body"
         >
           <strong className="font-medium">Nobody is in a shot yet.</strong> Cast the shots
           first — that is what tells each still which character sheets to draw from, and it
@@ -225,7 +225,7 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
       {shots.stale_stills > 0 && (
         <div
           role="status"
-          className="mb-4 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+          className="mb-4 rounded border border-warn-border bg-warn p-4 text-sm text-warn-foreground"
         >
           <strong className="font-medium">Something upstream changed.</strong>{" "}
           {shots.stale_stills} {shots.stale_stills === 1 ? "still is" : "stills are"} out of
@@ -236,7 +236,7 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
       {shots.stale_audio > 0 && (
         <div
           role="status"
-          className="mb-6 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+          className="mb-6 rounded border border-warn-border bg-warn p-4 text-sm text-warn-foreground"
         >
           <strong className="font-medium">A line or a voice changed.</strong>{" "}
           {shots.stale_audio} {shots.stale_audio === 1 ? "clip is" : "clips are"} out of date.
@@ -245,13 +245,13 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
       )}
 
       {actionError && (
-        <p role="alert" className="mb-6 text-sm text-red-600">
+        <p role="alert" className="mb-6 text-sm text-danger">
           {actionError}
         </p>
       )}
 
       {shots.shots.length === 0 ? (
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-muted">
           No shots yet. Generate a script first, then come back to draw them.
         </p>
       ) : (
@@ -259,7 +259,7 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
           {missing.length > 0 && (
             <div className="mb-6 flex items-center justify-end gap-3">
               {remaining > 0 && (
-                <span role="status" className="text-sm text-neutral-500">
+                <span role="status" className="text-sm text-muted">
                   {remaining} left…
                 </span>
               )}

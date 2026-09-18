@@ -68,7 +68,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="rounded border border-neutral-300 px-3 py-2"
+            className="rounded border border-strong px-3 py-2"
           />
         </label>
 
@@ -80,12 +80,12 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
             minLength={8}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="rounded border border-neutral-300 px-3 py-2"
+            className="rounded border border-strong px-3 py-2"
           />
         </label>
 
         {error && (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
@@ -93,13 +93,13 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         <button
           type="submit"
           disabled={busy}
-          className="rounded bg-neutral-900 px-4 py-2 text-white disabled:opacity-50"
+          className="rounded bg-accent px-4 py-2 text-accent-foreground disabled:opacity-50"
         >
           {busy ? "Working…" : copy.submit}
         </button>
       </form>
 
-      <p className="mt-6 text-sm text-neutral-600">
+      <p className="mt-6 text-sm text-body">
         {copy.altText}{" "}
         <Link href={copy.altHref} className="underline">
           {copy.altLabel}

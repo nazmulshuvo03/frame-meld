@@ -35,7 +35,7 @@ export function MeldCard({
   }
 
   return (
-    <li className="flex items-center justify-between rounded border border-neutral-200 p-4">
+    <li className="flex items-center justify-between rounded border border-subtle p-4">
       <div className="min-w-0">
         {editing ? (
           <input
@@ -51,14 +51,14 @@ export function MeldCard({
                 setEditing(false);
               }
             }}
-            className="rounded border border-neutral-300 px-2 py-1"
+            className="rounded border border-strong px-2 py-1"
           />
         ) : (
           <Link href={`/meld/${meld.id}`} className="block truncate font-medium hover:underline">
             {meld.title}
           </Link>
         )}
-        <p className="mt-1 text-xs text-neutral-500">
+        <p className="mt-1 text-xs text-muted">
           {STAGE_LABELS[meld.stage] ?? meld.stage} · updated{" "}
           {new Date(meld.updated_at).toLocaleDateString()}
         </p>
@@ -72,11 +72,11 @@ export function MeldCard({
             setDraftTitle(meld.title);
             setEditing(true);
           }}
-          className="text-neutral-600 hover:underline"
+          className="text-body hover:underline"
         >
           Rename
         </button>
-        <button onClick={() => onDelete(meld.id)} className="text-red-600 hover:underline">
+        <button onClick={() => onDelete(meld.id)} className="text-danger hover:underline">
           Delete
         </button>
       </div>

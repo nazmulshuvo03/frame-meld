@@ -31,12 +31,12 @@ export function QuoteButton({
       <button
         onClick={onClick}
         disabled={busy || disabled || !affordable}
-        className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+        className="rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
       >
         {busy ? busyLabel : `${label} · ${credits} credits`}
       </button>
       {!affordable && (
-        <span role="alert" className="text-xs text-red-600">
+        <span role="alert" className="text-xs text-danger">
           You need {credits - (balance ?? 0)} more credits.
         </span>
       )}

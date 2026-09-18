@@ -6,7 +6,7 @@ import { CAMERA_ANGLES, DIALOGUE_KINDS, updateShot, type Shot } from "@/lib/api"
 import { useAutosave } from "@/lib/useAutosave";
 
 const FIELD =
-  "w-full rounded border border-neutral-200 p-2 text-sm outline-none focus:border-neutral-400";
+  "w-full rounded border border-subtle p-2 text-sm outline-none focus:border-edge-focus";
 
 export function ShotCard({
   meldId,
@@ -46,19 +46,19 @@ export function ShotCard({
     setShot((current) => ({ ...current, [field]: value }));
 
   return (
-    <li className="rounded border border-neutral-200 p-4">
-      <div className="mb-3 flex items-center gap-2 text-xs text-neutral-500">
+    <li className="rounded border border-subtle p-4">
+      <div className="mb-3 flex items-center gap-2 text-xs text-muted">
         <span>Shot {shot.order_index + 1}</span>
         {shot.state === "stale" && <StaleBadge />}
         <span className="ml-auto" role="status" aria-live="polite">
           {status === "saving" && "Saving…"}
           {status === "saved" && "Saved"}
-          {status === "error" && <span className="text-red-600">Couldn&apos;t save</span>}
+          {status === "error" && <span className="text-danger">Couldn&apos;t save</span>}
         </span>
       </div>
 
       <label className="mb-2 block">
-        <span className="mb-1 block text-xs text-neutral-500">
+        <span className="mb-1 block text-xs text-muted">
           Image prompt — what the frame looks like
         </span>
         <textarea
@@ -70,7 +70,7 @@ export function ShotCard({
       </label>
 
       <label className="mb-2 block">
-        <span className="mb-1 block text-xs text-neutral-500">
+        <span className="mb-1 block text-xs text-muted">
           Motion prompt — what moves within it
         </span>
         <textarea
@@ -83,7 +83,7 @@ export function ShotCard({
 
       <div className="mb-2 grid grid-cols-3 gap-2">
         <label>
-          <span className="mb-1 block text-xs text-neutral-500">Seconds (max 5)</span>
+          <span className="mb-1 block text-xs text-muted">Seconds (max 5)</span>
           <input
             type="number"
             min="0.5"
@@ -98,7 +98,7 @@ export function ShotCard({
           />
         </label>
         <label>
-          <span className="mb-1 block text-xs text-neutral-500">Camera</span>
+          <span className="mb-1 block text-xs text-muted">Camera</span>
           <select
             value={shot.camera}
             onChange={(e) => edit("camera", e.target.value as Shot["camera"])}
@@ -112,7 +112,7 @@ export function ShotCard({
           </select>
         </label>
         <label>
-          <span className="mb-1 block text-xs text-neutral-500">Dialogue</span>
+          <span className="mb-1 block text-xs text-muted">Dialogue</span>
           <select
             value={shot.dialogue_kind}
             onChange={(e) => edit("dialogue_kind", e.target.value as Shot["dialogue_kind"])}
@@ -129,7 +129,7 @@ export function ShotCard({
 
       {shot.dialogue_kind !== "none" && (
         <label className="block">
-          <span className="mb-1 block text-xs text-neutral-500">Spoken over this shot</span>
+          <span className="mb-1 block text-xs text-muted">Spoken over this shot</span>
           <textarea
             value={shot.speech_text}
             onChange={(e) => edit("speech_text", e.target.value)}

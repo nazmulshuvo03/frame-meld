@@ -73,7 +73,7 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
   if (loadError) {
     return (
       <main className="p-8">
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {loadError}
         </p>
       </main>
@@ -81,7 +81,7 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
   }
 
   if (script === null) {
-    return <main className="p-8 text-sm text-neutral-500">Loading…</main>;
+    return <main className="p-8 text-sm text-muted">Loading…</main>;
   }
 
   const busy = jobId !== null;
@@ -91,12 +91,12 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col p-8">
       <header className="mb-6">
         <div className="flex items-baseline justify-between">
-          <Link href={`/meld/${id}`} className="text-sm text-neutral-500 hover:underline">
+          <Link href={`/meld/${id}`} className="text-sm text-muted hover:underline">
             ← Story
           </Link>
           <Link
             href={`/meld/${id}/cast`}
-            className="text-sm text-neutral-500 hover:underline"
+            className="text-sm text-muted hover:underline"
           >
             Next up: Cast →
           </Link>
@@ -106,7 +106,7 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
           <button
             onClick={onGenerate}
             disabled={busy}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+            className="rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
           >
             {busy
               ? job?.state === "running"
@@ -118,7 +118,7 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
           </button>
         </div>
         {script.scenes.length > 0 && (
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-muted">
             {script.scenes.length} {script.scenes.length === 1 ? "scene" : "scenes"} ·{" "}
             {shotCount} {shotCount === 1 ? "shot" : "shots"}
           </p>
@@ -128,7 +128,7 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
       {script.stale_shots > 0 && (
         <div
           role="status"
-          className="mb-6 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+          className="mb-6 rounded border border-warn-border bg-warn p-4 text-sm text-warn-foreground"
         >
           <strong className="font-medium">Your story changed.</strong> {script.stale_shots}{" "}
           {script.stale_shots === 1 ? "shot is" : "shots are"} out of date. Nothing has been
@@ -137,13 +137,13 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
       )}
 
       {actionError && (
-        <p role="alert" className="mb-6 text-sm text-red-600">
+        <p role="alert" className="mb-6 text-sm text-danger">
           {actionError}
         </p>
       )}
 
       {script.scenes.length === 0 ? (
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-muted">
           No script yet. Generate one from your story to get a shot list you can edit.
         </p>
       ) : (
