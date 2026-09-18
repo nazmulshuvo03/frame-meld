@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 from arq.connections import RedisSettings
 from arq.typing import WorkerCoroutine
 from arq.worker import Retry
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
 from framemeld.assets.service import store_asset
@@ -178,9 +178,11 @@ async def run_generate_script(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
         return JobOutcome(JobState.FAILED, retryable=False)
     except Exception:
         # Anything unforeseen still has to leave the row in a state a user
-        # can act on. An exception escaping here rolls back mark_running,
-        # stranding the job in `queued` with no worker behind it and no way
-        # to re-enqueue it, because ensure_job treats `queued` as live.
+        # can act on. mark_running now commits its claim, so an exception
+        # escaping here strands the job in `running` rather than `queued` --
+        # either way ensure_job treats it as live and will not re-enqueue
+        # it, so the catch-all is what turns a crash into a row the user can
+        # act on and a hold that comes back.
         logger.exception("generate_script crashed for job %s", job.id)
         await mark_failed(db, job, "Generating the script failed unexpectedly. Try again.")
         await _close_hold(db, job, succeeded=False)
@@ -817,6 +819,30 @@ async def generate_music(ctx: dict[str, Any], job_id: str) -> str:
     return outcome.state.value
 
 
+def _progress_writer(db: DbSession, job_id: uuid.UUID):
+    """A callback that records a render's progress as it arrives.
+
+    It has to *commit*, not merely flush, or it is pointless: the api reads
+    the job on a different connection, and an uncommitted number is one only
+    this transaction can see -- the same mistake `mark_running` made until
+    2026-09-19.
+
+    Committing the job's own session is safe here precisely because of that
+    fix. `mark_running` now commits its claim, and between it and the render
+    call `_run_render` only *reads* -- it builds the scene spec and checks a
+    hash. So there is nothing pending for this commit to flush early. **If a
+    write is ever added before `client.render()`, it lands in the first
+    progress commit**, and belongs either after the render or in its own
+    transaction.
+    """
+
+    async def record(percent: int) -> None:
+        await db.execute(update(Job).where(Job.id == job_id).values(progress_pct=percent))
+        await db.commit()
+
+    return record
+
+
 async def _run_render(db: DbSession, job_id: uuid.UUID, kind: RenderKind) -> JobOutcome:
     """Assemble one Meld into a film (spec section 4.2).
 
@@ -862,7 +888,7 @@ async def _run_render(db: DbSession, job_id: uuid.UUID, kind: RenderKind) -> Job
 
     client = get_render_client()
     try:
-        video = await client.render(spec.to_request())
+        video = await client.render(spec.to_request(), _progress_writer(db, job_id))
     except ProviderError as exc:
         logger.warning("%s failed for job %s: %s", job.kind.value, job.id, exc)
         if exc.retryable and job.attempts < MAX_ATTEMPTS:

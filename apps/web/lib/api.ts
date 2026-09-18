@@ -176,6 +176,8 @@ export type Job = {
   state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   attempts: number;
   error: string | null;
+  /** 0-100 while a render runs; null for job kinds that cannot report it. */
+  progress_pct: number | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

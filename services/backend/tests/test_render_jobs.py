@@ -28,13 +28,19 @@ FAKE_MP4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
 
 
 class _FakeRenderClient:
-    def __init__(self, error=None, video: bytes = FAKE_MP4):
+    def __init__(self, error=None, video: bytes = FAKE_MP4, progress: tuple[int, ...] = ()):
         self._error = error
         self._video = video
+        #: Percentages this fake will report before finishing, so a caller
+        #: can drive the progress path without a render service.
+        self._progress = progress
         self.specs: list[dict] = []
 
-    async def render(self, spec):
+    async def render(self, spec, on_progress=None):
         self.specs.append(spec)
+        for percent in self._progress:
+            if on_progress is not None:
+                await on_progress(percent)
         if self._error is not None:
             raise self._error
         return self._video
@@ -315,3 +321,45 @@ async def test_an_empty_download_is_refused_rather_than_stored():
 
     with pytest.raises(ProviderResponseError):
         await _client(handler).render(SPEC)
+
+
+# --- render progress ------------------------------------------------------
+
+
+async def test_a_render_records_its_progress_on_the_job(logged_in, db, monkeypatch):
+    """The Film page reads this to say "Assembling… 42%".
+
+    Written after the browser pass, 2026-09-19, which is where the whole
+    feature turned out to be inert: the worker collects its changes and
+    commits once at the end, so a progress row written through *its* session
+    is invisible until the render is over -- by which time nobody wants it.
+    `_progress_writer` therefore uses its own session, and that is exactly
+    what this asserts, by reading the job back through a session the job's
+    own transaction is not holding.
+    """
+    meld_id = await drawn(logged_in, db)
+    client = _FakeRenderClient(progress=(0, 37, 88))
+    monkeypatch.setattr("framemeld.worker.get_render_client", lambda: client)
+
+    started = await logged_in.post(f"/melds/{meld_id}/film/preview")
+    job_id = uuid.UUID(started.json()["id"])
+
+    outcome = await run_render_preview(db, job_id)
+    assert outcome.state is JobState.SUCCEEDED
+
+    job = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one()
+    assert job.progress_pct == 88
+
+
+async def test_a_job_that_cannot_report_progress_leaves_it_null(logged_in, db):
+    """NULL and 0 are different facts: "this kind has no notion of progress"
+    versus "this render has not started". A UI that cannot tell them apart
+    shows a 0% bar on a job that will never move."""
+    meld_id = await scripted(logged_in, db)
+    started = await logged_in.post(f"/melds/{meld_id}/film/music")
+
+    job_id = uuid.UUID(started.json()["id"])
+    await run_generate_music(db, job_id)
+
+    job = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one()
+    assert job.progress_pct is None

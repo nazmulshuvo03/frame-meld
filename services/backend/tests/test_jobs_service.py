@@ -162,3 +162,40 @@ async def test_the_recording_queue_records(db):
     queue = RecordingQueue()
     await queue.enqueue("generate_script", uuid.UUID(int=1))
     assert queue.enqueued == [("generate_script", uuid.UUID(int=1))]
+
+
+async def test_mark_running_commits_so_other_connections_can_see_it(db, monkeypatch):
+    """A claim nobody else can see is not a claim.
+
+    Found in the browser, 2026-09-19: a render job ran for twenty seconds
+    while the api -- on its own connection -- still read `queued` and
+    `started_at IS NULL`, so the Film page said "Queued…" from the first
+    frame to the last. `mark_running` flushed but never committed, and a
+    worker job does not commit until it finishes, so *every* job was
+    invisible as running for its entire life. The fast ones simply hid it.
+
+    Asserted by watching for the commit rather than by reading the row from
+    a second connection, because this suite's `db` fixture holds everything
+    inside one outer transaction it always rolls back -- a genuinely
+    separate connection cannot see the Meld either, so such a test would
+    fail whether or not the bug was present.
+    """
+    meld = await _meld(db)
+    dispatch = await _dispatch(db, meld)
+
+    commits = 0
+    real_commit = db.commit
+
+    async def counting_commit():
+        nonlocal commits
+        commits += 1
+        await real_commit()
+
+    monkeypatch.setattr(db, "commit", counting_commit)
+
+    job = await mark_running(db, dispatch.job.id)
+
+    assert job is not None
+    assert commits == 1, "mark_running must commit its claim, not just flush it"
+    assert job.state is JobState.RUNNING
+    assert job.started_at is not None

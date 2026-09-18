@@ -24,6 +24,17 @@ import {
   renderPreview,
 } from "@/lib/api";
 
+/** "Assembling… 42%" once the render service has reported a figure.
+ *
+ *  Falls back to the bare word when `progress_pct` is null, which is the
+ *  honest answer for the gap between a render starting and its first
+ *  reported frame — a bar that reads 0% for the first few seconds of a
+ *  ten-minute render is worse than no number, because it looks stuck.
+ */
+function assemblingLabel(job: Job): string {
+  return job.progress_pct === null ? "Assembling…" : `Assembling… ${job.progress_pct}%`;
+}
+
 //: Used only until /credits/pricing lands — see the Cast page for why this
 //: exists and why it is never the source of truth.
 const FALLBACK_MUSIC_CREDITS = 24;
@@ -228,7 +239,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
               >
                 {busy && job?.kind === "render_preview"
                   ? job.state === "running"
-                    ? "Assembling…"
+                    ? assemblingLabel(job)
                     : "Queued…"
                   : preview?.asset_id
                     ? "Render again · free"
@@ -367,7 +378,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
                 disabled={!animated}
                 busyLabel={
                   job?.kind === "render_final" && job.state === "running"
-                    ? "Assembling…"
+                    ? assemblingLabel(job)
                     : "Queued…"
                 }
                 label={final?.asset_id ? "Render it again" : "Render the film"}

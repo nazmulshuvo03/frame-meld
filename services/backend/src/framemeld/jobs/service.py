@@ -117,7 +117,27 @@ async def mark_running(db: DbSession, job_id: uuid.UUID) -> Job | None:
     job.state = JobState.RUNNING
     job.attempts += 1
     job.started_at = datetime.now(UTC)
-    await db.flush()
+    # Committed, not just flushed, and this is the difference between a
+    # claim and a note-to-self.
+    #
+    # A worker job commits once, at the end, in its arq wrapper. Until then
+    # a flush is visible only inside this transaction -- so for a job's
+    # entire life the api, on its own connection, still reads `queued`. On
+    # the jobs that take 50 ms nobody noticed. On a render that takes twenty
+    # seconds (or ten minutes at thirty shots) the button says "Queued…"
+    # from the first frame to the last, and `started_at` is null the whole
+    # time.
+    #
+    # It also makes the double-delivery guard above mean what it says: two
+    # workers handed the same message cannot both see `queued` and both
+    # claim it, because the winner's claim is committed before either runs.
+    #
+    # Safe to commit here because this is the first write every run_* makes,
+    # so the only thing pending is the claim itself. `expire_on_commit` is
+    # False on both session factories, so `job` stays usable afterwards
+    # rather than needing a refresh -- which on an AsyncSession would be the
+    # MissingGreenlet m3-decisions.md records.
+    await db.commit()
     return job
 
 

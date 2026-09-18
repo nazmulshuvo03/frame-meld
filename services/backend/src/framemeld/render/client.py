@@ -1,4 +1,6 @@
 import asyncio
+import logging
+from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 import httpx
@@ -22,12 +24,32 @@ _DOWNLOAD_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
 _TERMINAL = frozenset({"done", "failed"})
 
+logger = logging.getLogger(__name__)
+
+
+def _percent(progress: object) -> int | None:
+    """The render service's 0..1 fraction as whole percent, or None.
+
+    Clamped rather than trusted: this number is written to a column and
+    shown to a user, and a service reporting 1.4 or -0 should move a bar to
+    100 or 0 rather than put a nonsense value in the database.
+    """
+    if not isinstance(progress, (int, float)) or isinstance(progress, bool):
+        return None
+    return max(0, min(100, round(float(progress) * 100)))
+
+
+#: Called with whole percent, 0-100, each time the render service reports a
+#: figure that differs from the last one. Async because the only caller
+#: writes it to the database.
+ProgressCallback = Callable[[int], Awaitable[None]]
+
 
 class RenderClient(Protocol):
     """Spec section 3.1's two endpoints, as something the worker can be
     handed a fake of."""
 
-    async def render(self, spec: dict) -> bytes: ...
+    async def render(self, spec: dict, on_progress: ProgressCallback | None = None) -> bytes: ...
 
 
 class HttpRenderClient:
@@ -48,7 +70,7 @@ class HttpRenderClient:
     def _client(self, timeout: httpx.Timeout) -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=timeout, transport=self._transport)
 
-    async def render(self, spec: dict) -> bytes:
+    async def render(self, spec: dict, on_progress: ProgressCallback | None = None) -> bytes:
         """The finished MP4's bytes, or a ProviderError explaining why not.
 
         Raises the provider error types rather than its own: the worker
@@ -59,7 +81,7 @@ class HttpRenderClient:
         film's problem and is not.
         """
         render_id = await self._submit(spec)
-        output_url = await self._await_output(render_id)
+        output_url = await self._await_output(render_id, on_progress)
         return await self._download(output_url)
 
     async def _submit(self, spec: dict) -> str:
@@ -79,8 +101,13 @@ class HttpRenderClient:
             raise ProviderResponseError("The render service did not say what it started.")
         return render_id
 
-    async def _await_output(self, render_id: str) -> str:
+    async def _await_output(
+        self, render_id: str, on_progress: ProgressCallback | None = None
+    ) -> str:
         deadline = asyncio.get_running_loop().time() + settings.render_timeout_seconds
+        # The last figure actually reported, so a render that sits at 4% for
+        # a minute writes one row rather than thirty identical ones.
+        last_reported: int | None = None
 
         while True:
             try:
@@ -96,6 +123,17 @@ class HttpRenderClient:
 
             body = response.json() or {}
             status = str(body.get("status", ""))
+
+            if on_progress is not None:
+                percent = _percent(body.get("progress"))
+                if percent is not None and percent != last_reported:
+                    last_reported = percent
+                    # Never let reporting progress fail a render. This is a
+                    # number on a button; the film is the job.
+                    try:
+                        await on_progress(percent)
+                    except Exception:  # pragma: no cover - defensive
+                        logger.warning("could not record render progress", exc_info=True)
 
             if status == "done":
                 output_url = body.get("output_url")

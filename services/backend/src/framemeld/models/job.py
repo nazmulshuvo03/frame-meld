@@ -83,6 +83,21 @@ class Job(Base):
     #: one.
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
 
+    #: How far along a render is, 0-100, or NULL for a job kind that has no
+    #: notion of progress.
+    #:
+    #: NULL rather than 0 for those, deliberately: "this job does not report
+    #: progress" and "this render has not started yet" are different facts,
+    #: and a UI that cannot tell them apart shows a 0% bar on a job that will
+    #: never move. Only the two render kinds write it -- everything else is
+    #: one provider call the worker cannot see inside of.
+    #:
+    #: Whole percent, not the 0..1 fraction the render service reports. The
+    #: conversion happens once, at the client boundary, because a percentage
+    #: is what is displayed and storing three decimal places of a number
+    #: rounded for display is precision nobody reads.
+    progress_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
