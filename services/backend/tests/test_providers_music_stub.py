@@ -44,9 +44,29 @@ async def test_a_very_long_film_is_capped_rather_than_synthesised():
 
 
 def test_an_unknown_provider_name_raises_rather_than_falling_back(monkeypatch):
-    """Falling back would score a paying user's film with a sine chord."""
+    """Falling back would score a paying user's film with a sine chord.
+
+    This test named `lyria` until 2026-09-19, when a Lyria adapter landed
+    and the name started resolving. Renamed rather than deleted, to
+    `ace-step` -- spec section 6's commercially-safe self-hosted candidate,
+    which has no adapter. The assertion is about the *absence of a
+    fallback*, not about any particular name, so it needs a name that is
+    genuinely unimplemented to keep asserting anything.
+    """
     from framemeld.config import settings
 
-    monkeypatch.setattr(settings, "music_provider", "lyria")
+    monkeypatch.setattr(settings, "music_provider", "ace-step")
     with pytest.raises(ValueError, match="Unknown MUSIC_PROVIDER"):
         get_music_provider()
+
+
+def test_the_lyria_name_resolves_to_the_lyria_adapter(monkeypatch):
+    """The other half of the registry's contract, and the half that would
+    otherwise only be exercised by a live call: a configured name has to
+    reach its implementation, not just fail to raise."""
+    from framemeld.config import settings
+    from framemeld.providers.music.gemini import LyriaMusicProvider
+
+    monkeypatch.setattr(settings, "music_provider", "lyria")
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+    assert isinstance(get_music_provider(), LyriaMusicProvider)

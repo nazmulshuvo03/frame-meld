@@ -16,23 +16,27 @@ becomes a script, a cast, character sheets, one still and one audio clip per
 shot, an animated-stills Preview you can watch for free, a clip per shot, and
 a 1920×1080 MP4 you pay credits for and download.
 
-**One honest caveat, stated up front:** no generative model has ever been
-called from this codebase. Images, speech, music and video each ship a
-`Protocol`, a registry, a stub that produces the real media format, and — for
-images and speech — an adapter written against the provider's documentation
-that has never returned a success. The key this was built with has no billing,
-and free tiers either do not exist for these models or answered 429 throughout.
-So what is finished is the *system*: the staleness graph, the credit ledger,
-the job pipeline, the render service and the UI are all real and verified end
-to end. Swapping in a paid model is a config line, which is exactly what the
-adapter boundary was for — but nobody has done it, and the first real call will
-find bugs. See each milestone's decision record for what is verified and what
-is not.
+**All five provider slots now have a working adapter**, each verified against
+the real API (2026-09-19). LLM, images, speech, music and video each ship a
+`Protocol`, a registry, a stub that produces the real media format, and a real
+adapter — see [`docs/superpowers/providers-decisions.md`](docs/superpowers/providers-decisions.md).
+
+**The honest caveat, stated up front:** no *full pipeline run* against real
+models has happened. Each adapter has been called in isolation; the end-to-end
+path has only ever run on stubs, because a real 30-shot film costs ~$7 in video
+alone. **Every provider therefore defaults to `stub`** and turning one on is a
+deliberate edit — which is also why the test suite runs for free.
+
+Two things the first real calls found, both of which contradicted a documented
+assumption: Veo accepts only 4, 6 or 8 second clips (while its error message
+claims otherwise), and Veo clips carry an audio track that cannot be disabled,
+which spec §8 had assumed would not exist.
 
 What's verified and how:
 
-- The backend test suite (624 tests) passes, plus a frontend suite (45 tests)
-  and a clean `tsc --noEmit` on the render service — see [Tests](#tests).
+- The backend test suite (689 tests, 6 opt-in live-API skips) passes, plus a
+  frontend suite (85 tests) and a clean `tsc --noEmit` on the render service —
+  see [Tests](#tests).
 - **The migration chain builds the schema from nothing.** All nine migrations
   applied in order against an empty database, and `alembic check` reports no
   drift. The last three needed no enum widening at all: every job kind and
@@ -78,14 +82,15 @@ What's verified and how:
 | `services/backend/src/framemeld/shots` | shot/character casting, the multi-parent hash, the Shots API |
 | `services/backend/src/framemeld/providers/images` | `ImageProvider`, its stub, and the Gemini adapter |
 | `services/backend/src/framemeld/providers/speech` | `SpeechProvider`, the voice list, its stub, and the Gemini TTS adapter |
-| `services/backend/src/framemeld/providers/music` | `MusicProvider` and its stub. No real adapter yet (M5-D2) |
-| `services/backend/src/framemeld/providers/video` | `VideoProvider` and an ffmpeg-backed stub. No real adapter yet (M6-D9) |
+| `services/backend/src/framemeld/providers/music` | `MusicProvider`, its stub, and the Lyria adapter |
+| `services/backend/src/framemeld/providers/video` | `VideoProvider`, an ffmpeg-backed stub, and the Veo adapter |
 | `services/backend/src/framemeld/render` | scene spec assembly, the render hashes, the HTTP client for the render service, the Film API |
 | `services/render` | The Remotion render service: a scene spec in, an MP4 out. No database, no auth, no knowledge of users (spec §3.1) |
 | `apps/web` | Next.js frontend — signup/login, Meld list, story editor, Script page, Cast page, Shots page, Film page |
 | `docs/superpowers/specs` | Design spec |
 | `docs/superpowers/plans` | Per-milestone implementation plans |
 | `docs/superpowers/m1-decisions.md` … `m6-decisions.md` | Execution ledgers — the *why* behind non-obvious code |
+| `docs/superpowers/providers-decisions.md` | The same, for wiring the five real providers |
 
 ## Running locally
 

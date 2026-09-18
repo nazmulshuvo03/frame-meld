@@ -703,6 +703,23 @@ async def generate_speech(ctx: dict[str, Any], job_id: str) -> str:
 #: a surprise here is a file a browser will not play.
 _VIDEO_MIME = "video/mp4"
 
+#: The file extension each audio container is stored under. Only the music
+#: job needs this: speech is always a WAV, because the speech adapter wraps
+#: the provider's raw PCM itself.
+_AUDIO_EXT = {"audio/mpeg": "mp3", "audio/wav": "wav"}
+
+
+def _audio_ext(mime: str) -> str:
+    """`mp3` for `audio/mpeg`, and the subtype for anything unrecognised.
+
+    Falling back rather than raising, deliberately: by the time this runs
+    the provider has been paid and the bytes are in hand, so refusing to
+    file them under an unfamiliar name would throw away work the user is
+    already being charged for. A slightly odd extension is recoverable; a
+    failed job after a successful generation is not.
+    """
+    return _AUDIO_EXT.get(mime, mime.rpartition("/")[2] or "bin")
+
 
 async def run_generate_music(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
     """Score one Meld (M5-D2).
@@ -754,8 +771,15 @@ async def run_generate_music(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
         await _close_hold(db, job, succeeded=False)
         return JobOutcome(JobState.FAILED, retryable=False)
 
+    # The music provider decides the container, and the two that exist
+    # disagree: the stub writes a WAV, Lyria answers with MP3. The asset's
+    # mime is what the asset route serves as Content-Type and what
+    # Remotion's decoder reads, so storing every score as `audio/wav` would
+    # hand the renderer an MP3 wearing a WAV label -- and the file extension
+    # would lie about it on disk too.
+    mime = str(result.raw.get("mimeType") or WAV_MIME)
     asset = await store_asset(
-        db, user_id=meld.user_id, data=result.bytes_, mime=WAV_MIME, ext="wav"
+        db, user_id=meld.user_id, data=result.bytes_, mime=mime, ext=_audio_ext(mime)
     )
 
     clip.asset_id = asset.id
@@ -765,6 +789,10 @@ async def run_generate_music(db: DbSession, job_id: uuid.UUID) -> JobOutcome:
     clip.provider = result.provider
     clip.model = result.model
     clip.credits_spent = job.credits_held
+    # None for anything that is not a WAV, which now includes every real
+    # score. Nothing reads a music clip's duration -- M5-D12 makes the score
+    # one track laid across the whole film and trimmed by the composition,
+    # so its own length is not an input to anything.
     clip.duration_sec = asset.duration_sec
     clip.updated_at = datetime.now(UTC)
 

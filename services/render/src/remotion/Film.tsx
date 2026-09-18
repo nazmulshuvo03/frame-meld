@@ -56,7 +56,15 @@ const Shot: React.FC<{ shot: SpecShot; fps: number }> = ({ shot, fps }) => {
         // OffthreadVideo rather than Video: it extracts frames with ffmpeg
         // instead of asking a headless browser to play a video in real time,
         // which is both faster and the only one that renders deterministically.
-        <OffthreadVideo src={shot.clip_url} style={fill} />
+        //
+        // muted, and that is a statement about the film rather than about a
+        // provider. Spec §8 assumed image-to-video models return silent
+        // clips and built the audio design on laying narration, dialogue and
+        // music over that silence — but Veo 3.1 returns an AAC track and
+        // refuses `generateAudio: false`, so an unmuted clip would play the
+        // model's invented ambience on top of the narration. The mix comes
+        // from `shot.audio` and the score, always, whatever the clip carries.
+        <OffthreadVideo src={shot.clip_url} style={fill} muted />
       ) : (
         <Img
           src={shot.still_url}

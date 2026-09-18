@@ -78,3 +78,14 @@ async def test_the_same_still_given_different_instructions_differs_too():
         image=STILL, motion_prompt="a violent whip pan", duration_sec=1.0, params={}
     )
     assert first.bytes_ != second.bytes_
+
+
+def test_the_veo_name_resolves_to_the_veo_adapter(monkeypatch):
+    """The other half of the registry's contract. M6-D9 kept the branch
+    shape so that adding Veo would be a two-line change; this pins that the
+    two lines actually connect."""
+    from framemeld.providers.video.gemini import VeoVideoProvider
+
+    monkeypatch.setattr(settings, "video_provider", "veo")
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+    assert isinstance(get_video_provider(), VeoVideoProvider)

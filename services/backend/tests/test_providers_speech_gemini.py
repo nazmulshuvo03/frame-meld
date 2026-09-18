@@ -104,10 +104,34 @@ async def test_the_key_travels_in_a_header_and_never_in_the_url(monkeypatch):
     assert _KEY not in seen["url"]
 
 
-async def test_the_cost_is_priced_per_input_character(monkeypatch):
+async def test_the_cost_is_priced_on_both_token_counts(monkeypatch):
+    """**Corrected 2026-09-19, by the first live call.**
+
+    This test used to assert `10.00 * len(text) / 1e6` — the audio *output*
+    rate, applied to the *input* in *characters*. Two errors that happened
+    to produce a plausible-looking number, which is why nothing caught them
+    until a real response arrived carrying `usageMetadata`: TTS reports a
+    text `promptTokenCount` and an audio `candidatesTokenCount`, and is
+    billed on both, at $0.50 and $10.00 per million respectively.
+    """
+    body_usage = {"usageMetadata": {"promptTokenCount": 17, "candidatesTokenCount": 134}}
+    provider = _provider(lambda request: _ok(_PCM, **body_usage), monkeypatch)
+
+    result = await provider.speak(text="She had known for years.", voice_id="Kore", params={})
+
+    expected = (Decimal("0.50") * 17 + Decimal("10.00") * 134) / Decimal("1000000")
+    assert result.cost_usd == expected
+    # The audio side dominates: costing only the text would be ~160x low.
+    assert result.cost_usd > Decimal("0.50") * 17 / Decimal("1000000") * 100
+
+
+async def test_a_response_with_no_usage_block_costs_zero_rather_than_raising(monkeypatch):
+    """Same fail-soft rule as the rate table itself (M3-D5): this number is
+    margin observability, never the billing input, so a missing usage block
+    must not fail a user's generation."""
     provider = _provider(lambda request: _ok(_PCM), monkeypatch)
-    result = await provider.speak(text="x" * 1000, voice_id="Kore", params={})
-    assert result.cost_usd == Decimal("10.00") * 1000 / Decimal("1000000")
+    result = await provider.speak(text="x", voice_id="Kore", params={})
+    assert result.cost_usd == Decimal("0")
 
 
 @pytest.mark.parametrize("status", [408, 429, 500, 503])

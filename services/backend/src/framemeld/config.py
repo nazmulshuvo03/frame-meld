@@ -63,21 +63,20 @@ class Settings(BaseSettings):
     # the default stays `stub`.
     speech_provider: str = "stub"
     speech_model: str = "gemini-2.5-flash-preview-tts"
-    # Same shape and same default again (M5-D2). Unlike the three above,
-    # there is no paid adapter behind this one: Lyria has no free tier and
-    # this key has no billing, so an adapter written against its documented
-    # response shape could never be called even once -- and two such
-    # adapters already exist. The stub emits a real WAV.
+    # Same shape and same default again. The `lyria` adapter landed on
+    # 2026-09-19, once the key had billing (M5-D2 had deferred it because an
+    # adapter that cannot be called even once is written against a guess).
+    # The model name is the one that answers today: `lyria-002` never did.
     music_provider: str = "stub"
-    music_model: str = "lyria-002"
-    # Same shape and same default again (M6-D9), and the same reason as
-    # MUSIC_PROVIDER: no paid adapter is written, because none could be
-    # called. Spec section 6 names Wan 2.2 via a hosted API for production
-    # and section 6.3 names Veo 3.1 Lite for local development; both are
-    # billed per second, this key has no billing, and the stub encodes a
-    # real MP4 so every path downstream of the model is exercised.
+    music_model: str = "lyria-3.5"
+    # Same shape and same default again. The `veo` adapter landed alongside
+    # the music one and for the same reason (M6-D9 deferred it). Spec
+    # section 6 names Wan 2.2 via a hosted API as the production target;
+    # section 6.3 names Veo 3.1 Lite for local development, and that is what
+    # this key can actually reach, so it is the model here. `wan-2.2-i2v`
+    # was a name with no adapter behind it.
     video_provider: str = "stub"
-    video_model: str = "wan-2.2-i2v"
+    video_model: str = "veo-3.1-lite-generate-preview"
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     gemini_api_key: str = ""

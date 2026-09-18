@@ -26,17 +26,14 @@ class GeminiImageProvider:
     """Gemini's image models over the same generateContent endpoint the text
     adapter uses.
 
-    UNVERIFIED AGAINST THE LIVE API. M3-D11 called for a probe before any
-    adapter was written, and the probe ran (2026-09-13): `:predict` 404s for
-    every current image model, so generateContent below is the right
-    endpoint -- but no call has ever *succeeded* on this account, because
-    image generation has zero free-tier quota (`limit: 0`) and the key's
-    project has no billing enabled. The success path here therefore follows
-    the documented inlineData shape, which is exactly the kind of assumption
-    M2's responseSchema incident punished. Enable billing, run
-    `FRAMEMELD_LIVE_IMAGE=1 pytest tests/test_providers_image_gemini.py`,
-    and correct _extract_image against whatever comes back before trusting
-    this with a user's credits.
+    VERIFIED AGAINST THE LIVE API on 2026-09-19, once billing was enabled on
+    the key. M3-D11's probe (2026-09-13) had already established that
+    `:predict` 404s for every current image model and that generateContent
+    is the right endpoint; what it could not do was exercise the success
+    path, because image generation has zero free-tier quota (`limit: 0`).
+    `test_the_real_api_draws_something` now passes, and the documented
+    `inlineData` shape `_extract_image` was written against turned out to be
+    the real one -- no correction was needed.
     """
 
     name = "gemini"

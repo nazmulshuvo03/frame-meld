@@ -1,7 +1,7 @@
 # Where FrameMeld is, and what is left
 
 **Written:** 2026-09-19
-**Last commit:** `bb4e7cc`
+**Last commit:** `69f61f8`
 
 A standing status note, written because the milestone plans and decision
 records describe *what was done* and nobody had written down *what is left*.
@@ -13,13 +13,16 @@ reasoning behind anything below that looks odd.
 ## The short version
 
 All six milestones in the design spec are implemented, plus four gaps the
-README listed as known. The one thing missing is the part the product is
-named for: **no generative model has ever been called.** Every stage runs on a
-stub that produces the real media format, so the pipeline, the money, the
-staleness graph and the render service are all real and verified end to end,
-and the pictures are flat colours.
+README listed as known. **All five provider slots now have a working adapter
+behind them**, each verified against the real API — the gap this note was
+originally written to describe is closed. See
+[`providers-decisions.md`](providers-decisions.md).
 
-That is a billing problem, not an engineering one — see *What is blocked*.
+What has *not* happened is a full pipeline run against real models. Every
+adapter has been called in isolation; the end-to-end path has only ever run on
+stubs, because doing it for real costs roughly $2–3 in video alone per film.
+Every provider therefore still defaults to `stub`, and turning one on is a
+deliberate edit.
 
 ---
 
@@ -37,8 +40,9 @@ That is a billing problem, not an engineering one — see *What is blocked*.
 | Structural editing | `e7f8c6d` | Add / delete / reorder scenes, shots and characters |
 | Job cancellation | `13678f1` | Stop a queued generation and get the hold back |
 | Deployment | `bb4e7cc` | Dockerfiles for all four services, compose profile, secure cookie, proxy headers |
+| Providers | — | Lyria and Veo adapters written; all five slots verified live ([`providers-decisions.md`](providers-decisions.md)) |
 
-**Gates, all green:** 650 backend tests + 4 opt-in skips · 85 frontend tests ·
+**Gates, all green:** 689 backend tests + 6 opt-in skips · 85 frontend tests ·
 `ruff check` / `ruff format --check` · `alembic check` reports no drift · `tsc`
 and `eslint` on both the web app and the render service · `next build` ·
 all three container images build.
@@ -51,54 +55,63 @@ for 0 credits, 6 clips in 9 s for exactly 480, Final in 36 s for 60, and a
 
 ---
 
-## What is blocked, and on what
+## Providers
 
-**Nothing here is waiting on code.**
+All five slots have a verified adapter. Every one defaults to `stub`; set the
+env var to turn a real model on.
 
-| Stage | Adapter | Status |
-|---|---|---|
-| LLM | `GeminiLLMProvider`, `OpenRouterLLMProvider` | Built. Gemini's free tier answered 429 on every attempt across four milestones |
-| Images | `GeminiImageProvider` | Built, **never returned a success**. No free tier; this key's project has no billing |
-| Speech | `GeminiSpeechProvider` | Built, **never returned a success**. A free tier does exist, so this is the cheapest one to close |
-| Music | — | **No adapter.** Lyria is paid; ACE-Step is the commercially-safe self-hosted option |
-| Video | — | **No adapter.** Wan 2.2 or Veo 3.1 Lite, both billed per second |
+| Stage | `*_PROVIDER` | Real adapter | Cost |
+|---|---|---|---|
+| LLM | `stub` \| `gemini` \| `openrouter` | `GeminiLLMProvider` | fractions of a cent |
+| Images | `stub` \| `gemini` | `GeminiImageProvider` | ~$0.039 an image |
+| Speech | `stub` \| `gemini` | `GeminiSpeechProvider` | ~$0.0013 a line |
+| Music | `stub` \| `lyria` | `LyriaMusicProvider` | $0.08 a track |
+| Video | `stub` \| `veo` | `VeoVideoProvider` | **$0.20–0.30 a clip** |
 
-The music and video adapters were deliberately not written (M5-D2, M6-D9):
-this codebase already carries two paid adapters whose success path has never
-executed, and a third and fourth written blind against documentation would be
-the same mistake twice more. The `Protocol` + registry + stub for each is in
-place, so each is a two-line registry change plus one adapter file.
+The five opt-in live tests are the cheapest way to confirm a key works:
 
-**To unblock:** enable billing on the Gemini key, or point `LLM_PROVIDER` at
-OpenRouter's paid tier. Then, cheapest first:
+```bash
+FRAMEMELD_LIVE_LLM=1    pytest tests/test_providers_gemini.py -k real
+FRAMEMELD_LIVE_SPEECH=1 pytest tests/test_providers_speech_gemini.py -k live
+FRAMEMELD_LIVE_IMAGE=1  pytest tests/test_providers_image_gemini.py -k real    # ~$0.04
+FRAMEMELD_LIVE_MUSIC=1  pytest tests/test_providers_music_lyria.py -k live     # ~$0.08
+FRAMEMELD_LIVE_VIDEO=1  pytest tests/test_providers_video_veo.py -k live       # ~$0.20
+```
 
-1. `FRAMEMELD_LIVE_SPEECH=1 pytest tests/test_providers_speech_gemini.py` —
-   free tier, so this one needs no billing at all. Correct `_extract_audio` /
-   `_to_wav` against what actually comes back.
-2. `FRAMEMELD_LIVE_IMAGE=1 pytest tests/test_providers_image_gemini.py` —
-   needs billing. ~$0.04 an image.
-3. Run the casting pass against a live model and read its answers: whether it
-   reliably tells "seen in the frame" from "mentioned" is untested.
-4. Write the music adapter, then the video adapter.
+**Two provider facts that constrain the product**, both found by probing and
+both written up in `providers-decisions.md`:
+
+- **Veo accepts only 4, 6 or 8 second clips** — and its own error message
+  claims the range is "between 4 and 8, inclusive" while rejecting 5 and 7.
+  Since spec §8 caps a shot at 5.0 s, there are exactly two usable tiers, and a
+  4.1-second shot costs 50% more than a 4.0-second one.
+- **Veo clips carry an audio track and cannot be asked not to.** Spec §8
+  assumed silent clips. The composition mutes them; the film's audio comes from
+  its audio timeline.
 
 ---
 
 ## What is left, in the order I would do it
 
-### 1. The first real generation (blocked on billing)
-Above. Everything else is cosmetic next to this: the product's whole claim is
-untested until one real image comes back.
+### 1. One full pipeline run against real models
+Each adapter has been called in isolation and the gates are green, but the
+whole path — story → script → cast → sheets → stills → speech → music → clips →
+Final — has only ever run on stubs.
 
-**Expect it to find bugs.** Three specific ones to watch for:
+Do it cheaply and in stages rather than all at once, because the video step
+dominates:
 
-- The Ken Burns numbers in `render/spec.py` have only ever moved a flat
-  rectangle. Whether a slow push into a real still reads as cinematic or as a
-  wobble is unjudged.
-- A clip that comes back at 4.8 s where the spec asked for 5.0 will leave a
-  black frame at the cut. `OffthreadVideo` in a `Series.Sequence` has never
-  seen a clip whose length disagreed with its slot.
-- Gemini's `responseSchema` has never been confirmed to accept
-  `SCRIPT_JSON_SCHEMA`'s exact nested shape (M2's open question, still open).
+1. `LLM_PROVIDER=gemini` alone. Free-ish, and it closes M4's open question:
+   whether the casting pass reliably tells "seen in the frame" from
+   "mentioned". Also confirms `SCRIPT_JSON_SCHEMA` against `responseSchema`.
+2. Add `IMAGE_PROVIDER=gemini`. ~$0.04 a still. **Then watch one Preview** —
+   the Ken Burns numbers in `render/spec.py` have still only ever moved a flat
+   colour, and whether a slow push into a real still reads as cinematic or as a
+   wobble is the one thing only a real image can answer.
+3. Add speech and music. Pennies.
+4. `VIDEO_PROVIDER=veo` last, on the **shortest film you can make**. At
+   $0.20–0.30 a clip this is the only step that costs real money; a 6-shot film
+   is ~$1.50 and a 30-shot one is ~$7.
 
 ### 2. Stripe (spec §10, deliberately deferred)
 A film costs ~2,900 credits against a 500-credit signup grant, so

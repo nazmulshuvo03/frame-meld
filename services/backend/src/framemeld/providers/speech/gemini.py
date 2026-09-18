@@ -33,15 +33,14 @@ class GeminiSpeechProvider:
     """Gemini's native TTS over the same generateContent endpoint the text
     and image adapters use.
 
-    UNVERIFIED AGAINST THE LIVE API, for the same reason the image adapter
-    is (see m3-decisions.md): no call has been made from this account. The
-    difference is that TTS *does* have a free tier, so this one is expected
-    to work once a key is configured -- but "expected to" is exactly the
-    assumption M2's responseSchema incident and M3's Imagen-4 probe both
-    punished. Run
-    `FRAMEMELD_LIVE_SPEECH=1 pytest tests/test_providers_speech_gemini.py`
-    and correct `_extract_audio` against what actually comes back before
-    trusting this with a user's credits. SPEECH_PROVIDER defaults to `stub`.
+    VERIFIED AGAINST THE LIVE API on 2026-09-19, after four milestones of
+    carrying the opposite warning. `test_live_speech` passed on its first
+    real call: the documented `inlineData` + `audio/L16;rate=24000` shape is
+    what actually comes back, and `_extract_audio` / `_to_wav` needed no
+    correction. The one thing the live call *did* correct was the price --
+    `usageMetadata` reports a text-in and an audio-out token count, and this
+    adapter had been costing `len(text)` at the audio rate (see
+    providers/rates.py).
     """
 
     name = "gemini"
@@ -140,13 +139,20 @@ class GeminiSpeechProvider:
             raise ProviderResponseError("The speech model returned an unreadable reply.") from exc
 
         raw, mime = self._extract_audio(body)
+        usage = body.get("usageMetadata") or {}
         return ProviderResult(
             text=None,
             bytes_=self._to_wav(raw, mime),
-            # Priced per character of input, which is how TTS is billed --
-            # there is no output-token count to read (M3-D6's rule, same
-            # fail-soft table).
-            cost_usd=usd_for_speech(self.model, len(text)),
+            # Both sides, from the counts the response carries. TTS is billed
+            # on text in *and* audio out, and the audio side is twenty times
+            # the text side -- costing this on `len(text)` (as it was until
+            # the first live call, 2026-09-19) measured the cheap half in the
+            # wrong unit and ignored the expensive one.
+            cost_usd=usd_for_speech(
+                self.model,
+                int(usage.get("promptTokenCount") or 0),
+                int(usage.get("candidatesTokenCount") or 0),
+            ),
             provider=self.name,
             model=body.get("modelVersion") or self.model,
             raw={"mimeType": WAV_MIME},
