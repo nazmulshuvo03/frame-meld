@@ -5,9 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
 from framemeld.auth.deps import CurrentUser
+from framemeld.credits.service import refund
 from framemeld.db import get_session
+from framemeld.jobs import service as jobs_service
 from framemeld.jobs.queue import Queue, get_queue
 from framemeld.jobs.schemas import JobOut
+from framemeld.melds.service import get_meld
+from framemeld.models.job import JobState
 from framemeld.script import service
 from framemeld.script.schemas import (
     MoveIn,
@@ -18,6 +22,7 @@ from framemeld.script.schemas import (
     ShotOut,
     ShotPatch,
 )
+from framemeld.staleness import recompute_staleness
 
 router = APIRouter(prefix="/melds/{meld_id}", tags=["script"])
 
@@ -73,6 +78,40 @@ async def get_job(meld_id: uuid.UUID, job_id: uuid.UUID, user: CurrentUser, db: 
     if job is None:
         raise _not_found()
     return job
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobOut)
+async def cancel_job(meld_id: uuid.UUID, job_id: uuid.UUID, user: CurrentUser, db: Db) -> JobOut:
+    """Stop a queued generation and refund its hold.
+
+    Queued only (see jobs.service.cancel_job). The complaint this closes is
+    a stopped worker leaving a button on "Queued…" forever with the credits
+    still held -- and those jobs are all in exactly that state.
+    """
+    job = await service.get_job(db, user.id, meld_id, job_id)
+    if job is None:
+        raise _not_found()
+    try:
+        cancelled = await jobs_service.cancel_job(db, job)
+    except jobs_service.AlreadyRunning as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.reason) from None
+
+    if cancelled.state is JobState.CANCELLED and cancelled.credits_held:
+        meld = await get_meld(db, user.id, meld_id)
+        if meld is not None:
+            await refund(
+                db,
+                job_id=cancelled.id,
+                user_id=meld.user_id,
+                held=cancelled.credits_held,
+                description=f"{cancelled.kind.value} cancelled",
+            )
+        # Downstream rows were left in `generating` and are now back in the
+        # walk, so this is the first moment their state can be decided.
+        await recompute_staleness(db, meld_id)
+
+    await db.commit()
+    return cancelled
 
 
 @router.patch("/scenes/{scene_id}", response_model=SceneOut)

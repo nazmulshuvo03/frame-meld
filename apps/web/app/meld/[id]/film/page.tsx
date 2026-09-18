@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { CancelButton } from "@/components/CancelButton";
 import { CreditBalance } from "@/components/CreditBalance";
 import { QuoteButton } from "@/components/QuoteButton";
 import { StaleBadge } from "@/components/StaleBadge";
@@ -115,7 +116,7 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
     [drainQueue, load, loadBalance],
   );
 
-  const { job } = useJobPolling({ meldId: id, jobId, onSettled });
+  const { job, cancel, cancelError } = useJobPolling({ meldId: id, jobId, onSettled });
 
   const start = async (request: () => Promise<Job>) => {
     setActionError(null);
@@ -182,6 +183,17 @@ export default function FilmPage({ params }: { params: Promise<{ id: string }> }
         <div className="mt-1 flex flex-wrap items-baseline justify-between gap-4">
           <h1 className="text-2xl font-semibold">Film</h1>
           <CreditBalance balance={balance} />
+          {busy && (
+            <CancelButton
+              job={job}
+              onCancel={() => {
+                pending.current = [];
+                setRemaining(0);
+                void cancel();
+              }}
+              error={cancelError}
+            />
+          )}
         </div>
         {film.shot_count > 0 && (
           <p className="mt-1 text-sm text-muted">

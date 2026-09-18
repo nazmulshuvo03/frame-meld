@@ -1,6 +1,7 @@
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib import import_module
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
 from framemeld.hashing import canonical_hash
 from framemeld.models.job import Job, JobKind, JobState
+from framemeld.models.script import ArtifactState
 
 #: States in which an existing job is *the* answer: it is already going to
 #: run, is running, or has already produced what was asked for.
@@ -150,3 +152,80 @@ async def mark_for_retry(db: DbSession, job: Job, error: str) -> None:
     job.error = error[:2000]
     job.started_at = None
     await db.flush()
+
+
+class AlreadyRunning(Exception):
+    """A job was asked to stop after a worker had already claimed it.
+
+    Refused rather than force-marked cancelled. The worker is inside a
+    provider call by then: the money is already committed, the response is
+    still coming, and a row marked `cancelled` under it would be overwritten
+    by `mark_succeeded` seconds later -- leaving a user who was told the job
+    stopped with a charge and an artifact.
+
+    Stopping a running generation properly means cancelling it at the
+    provider, which none of the five adapters supports.
+    """
+
+    reason = "That one has already started. It will finish or fail on its own."
+
+
+#: Where a job's target lives, by `target_table`. Spelled out rather than
+#: resolved from the mapper registry: the set is fixed, and a lookup that
+#: could reach any table is a lookup that could clear any row.
+_TARGETS = {
+    "shot_images": "framemeld.models.shots:ShotImage",
+    "shot_clips": "framemeld.models.shots:ShotClip",
+    "audio_clips": "framemeld.models.shots:AudioClip",
+    "character_images": "framemeld.models.cast:CharacterImage",
+    "renders": "framemeld.models.render:Render",
+}
+
+
+async def _release_target(db: DbSession, job: Job) -> None:
+    """Take the job's artifact out of `generating`.
+
+    A cancelled job leaves a row claiming a worker is about to write it,
+    which the staleness engine deliberately will not touch (`generating` is
+    owned by the worker) -- so without this the row is stuck out of the walk
+    forever, invisible to both the user and the recompute.
+
+    `empty` when there are no bytes, `fresh` when there are: a regeneration
+    that was cancelled leaves the previous artwork exactly where it was, and
+    recompute_staleness decides immediately afterwards whether that artwork
+    is still current.
+    """
+    if job.target_id is None or job.target_table not in _TARGETS:
+        return
+
+    module_name, class_name = _TARGETS[job.target_table].split(":")
+    model = getattr(import_module(module_name), class_name)
+
+    row = (await db.execute(select(model).where(model.id == job.target_id))).scalar_one_or_none()
+    if row is None or row.state is not ArtifactState.GENERATING:
+        return
+    row.state = ArtifactState.FRESH if row.asset_id is not None else ArtifactState.EMPTY
+    row.updated_at = datetime.now(UTC)
+
+
+async def cancel_job(db: DbSession, job: Job) -> Job:
+    """Stop a queued job and give the money back.
+
+    Only `queued`. `mark_running` claims from that state and no other, so a
+    job left here is a job the worker will decline to run when the message
+    is eventually delivered -- which is what makes this safe without
+    reaching into arq: the queue may still hold a message, and it becomes a
+    no-op rather than a race.
+    """
+    if job.state is JobState.RUNNING:
+        raise AlreadyRunning
+    if job.state is not JobState.QUEUED:
+        # Already finished, failed or cancelled. Idempotent rather than an
+        # error: two clicks on a button that was about to disappear anyway.
+        return job
+
+    job.state = JobState.CANCELLED
+    job.finished_at = datetime.now(UTC)
+    await _release_target(db, job)
+    await db.flush()
+    return job

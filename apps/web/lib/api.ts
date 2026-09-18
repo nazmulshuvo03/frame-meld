@@ -189,6 +189,12 @@ export const generateScript = (meldId: string) =>
 export const getJob = (meldId: string, jobId: string) =>
   request<Job>(`/melds/${meldId}/jobs/${jobId}`);
 
+/** Stop a queued generation and get the hold back. Refused with a 409 once
+ *  a worker has claimed it — by then the provider call is in flight and the
+ *  money is committed. */
+export const cancelJob = (meldId: string, jobId: string) =>
+  request<Job>(`/melds/${meldId}/jobs/${jobId}/cancel`, { method: "POST" });
+
 // Narrowed to exactly what the API's ScenePatch/ShotPatch declare. A wider
 // Partial<Scene>/Partial<Shot> would let a caller pass e.g. `state` or
 // `content_hash` — fields neither patch schema declares. The backend now

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ApiError, getJob, type Job } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ApiError, cancelJob, getJob, type Job } from "@/lib/api";
 
 const INTERVAL_MS = 1500;
 
@@ -19,8 +19,9 @@ export function useJobPolling({
   meldId: string;
   jobId: string | null;
   onSettled: (job: Job) => void;
-}): { job: Job | null } {
+}): { job: Job | null; cancel: () => Promise<void>; cancelError: string | null } {
   const [job, setJob] = useState<Job | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   // Kept in a ref so a caller that rebuilds the callback each render does
   // not restart the interval — which would poll far faster than intended.
@@ -67,5 +68,25 @@ export function useJobPolling({
     };
   }, [meldId, jobId]);
 
-  return { job };
+  const cancel = useCallback(async () => {
+    if (!jobId) return;
+    setCancelError(null);
+    try {
+      const stopped = await cancelJob(meldId, jobId);
+      setJob(stopped);
+      // Settle it here rather than waiting for the next poll: the caller
+      // clears its busy flag from onSettled, and a user who just pressed
+      // Cancel should not watch the button say "Queued…" for another
+      // second and a half.
+      onSettledRef.current(stopped);
+    } catch (err) {
+      // A 409 means a worker claimed it between the render and the click.
+      // Not an error the user did anything about — the job simply finishes.
+      setCancelError(
+        err instanceof ApiError ? err.message : "Couldn't stop that. It may already be running.",
+      );
+    }
+  }, [meldId, jobId]);
+
+  return { job, cancel, cancelError };
 }

@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { CancelButton } from "@/components/CancelButton";
 import { CreditBalance } from "@/components/CreditBalance";
 import { QuoteButton } from "@/components/QuoteButton";
 import { ShotMediaCard } from "@/components/ShotMediaCard";
@@ -119,7 +120,7 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
     [drainQueue, load, loadBalance],
   );
 
-  const { job } = useJobPolling({ meldId: id, jobId, onSettled });
+  const { job, cancel, cancelError } = useJobPolling({ meldId: id, jobId, onSettled });
 
   const start = async (request: () => Promise<Job>) => {
     setActionError(null);
@@ -193,6 +194,20 @@ export default function ShotsPage({ params }: { params: Promise<{ id: string }> 
           <h1 className="text-2xl font-semibold">Shots</h1>
           <div className="flex flex-wrap items-center gap-3">
             <CreditBalance balance={balance} />
+            {busy && (
+              <CancelButton
+                job={job}
+                onCancel={() => {
+                  // Drop the rest of the run as well. onSettled drains the
+                  // queue, so cancelling one shot would otherwise start the
+                  // next one — the opposite of what Stop means.
+                  pending.current = [];
+                  setRemaining(0);
+                  void cancel();
+                }}
+                error={cancelError}
+              />
+            )}
             <QuoteButton
               credits={castingCredits}
               balance={balance}

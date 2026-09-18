@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { CancelButton } from "@/components/CancelButton";
 import { SceneCard } from "@/components/SceneCard";
 import { useJobPolling } from "@/lib/useJobPolling";
 import {
@@ -59,7 +60,7 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
     [load],
   );
 
-  const { job } = useJobPolling({ meldId: id, jobId, onSettled });
+  const { job, cancel, cancelError } = useJobPolling({ meldId: id, jobId, onSettled });
 
   const onGenerate = async () => {
     setActionError(null);
@@ -128,7 +129,11 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
         </div>
         <div className="mt-1 flex items-baseline justify-between">
           <h1 className="text-2xl font-semibold">Script</h1>
-          <button
+          <div className="flex items-center gap-3">
+            {busy && (
+              <CancelButton job={job} onCancel={() => void cancel()} error={cancelError} />
+            )}
+            <button
             onClick={onGenerate}
             disabled={busy}
             className="rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
@@ -138,9 +143,10 @@ export default function ScriptPage({ params }: { params: Promise<{ id: string }>
                 ? "Writing the shot list…"
                 : "Queued…"
               : script.scenes.length
-                ? "Regenerate"
-                : "Generate script"}
-          </button>
+                  ? "Regenerate"
+                  : "Generate script"}
+            </button>
+          </div>
         </div>
         {script.scenes.length > 0 && (
           <p className="mt-1 text-sm text-muted">

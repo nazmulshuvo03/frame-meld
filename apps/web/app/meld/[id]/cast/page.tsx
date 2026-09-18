@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CharacterCard } from "@/components/CharacterCard";
+import { CancelButton } from "@/components/CancelButton";
 import { CreditBalance } from "@/components/CreditBalance";
 import { QuoteButton } from "@/components/QuoteButton";
 import { useJobPolling } from "@/lib/useJobPolling";
@@ -91,7 +92,7 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
     [load, loadBalance],
   );
 
-  const { job } = useJobPolling({ meldId: id, jobId, onSettled });
+  const { job, cancel, cancelError } = useJobPolling({ meldId: id, jobId, onSettled });
 
   const start = async (request: () => Promise<Job>) => {
     setActionError(null);
@@ -198,6 +199,9 @@ export default function CastPage({ params }: { params: Promise<{ id: string }> }
           <h1 className="text-2xl font-semibold">Cast</h1>
           <div className="flex items-center gap-3">
             <CreditBalance balance={balance} />
+            {busy && (
+              <CancelButton job={job} onCancel={() => void cancel()} error={cancelError} />
+            )}
             <QuoteButton
               credits={castCredits}
               balance={balance}
