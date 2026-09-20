@@ -79,8 +79,30 @@ class Settings(BaseSettings):
     video_model: str = "veo-3.1-lite-generate-preview"
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Appended to every system prompt the OpenRouter adapter sends, and
+    # empty by default so hosted providers are untouched. It exists for one
+    # local case: Qwen3 and its siblings are reasoning models, and the
+    # OpenAI-compatible servers that front them (Docker Model Runner,
+    # Ollama) expose no parameter to turn that off -- the switch is the
+    # literal token `/no_think` in the prompt. Probed 2026-09-20 against
+    # Qwen3-8B-Q4_K_M: the same title request cost 649 tokens and 53.9s with
+    # thinking on, and 16 tokens and 2.98s with the suffix. Without it a
+    # local model is not slow, it is unusable.
+    llm_system_suffix: str = ""
     gemini_api_key: str = ""
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+
+    # Local development providers (spec section 6.3's "cheapest thing that
+    # is honest"). Both default to the port their container publishes, and
+    # neither is reached unless SPEECH_PROVIDER/IMAGE_PROVIDER names them.
+    # From inside compose these have to be host.docker.internal, not
+    # localhost, which is the container itself.
+    kokoro_base_url: str = "http://localhost:8880/v1"
+    comfyui_base_url: str = "http://localhost:8188"
+    # The checkpoint filename as ComfyUI lists it, not a path. SDXL-Turbo
+    # is the development default because it draws in one step: 2.18s for a
+    # 1024x1024 still, against 20+ steps for an ordinary SDXL checkpoint.
+    comfyui_checkpoint: str = "sd_xl_turbo_1.0_fp16.safetensors"
 
     # FastAPI's interactive docs enumerate every endpoint and schema to
     # anonymous callers. Fine locally, not on a public host.

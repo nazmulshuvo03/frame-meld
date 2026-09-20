@@ -22,3 +22,6 @@ Thumbs.db
 
 # Generated images and other runtime artifacts (STORAGE_LOCAL_ROOT)
 var/
+
+# Local model weights for development providers (ComfyUI checkpoints, ~7GB each)
+checkpoints/

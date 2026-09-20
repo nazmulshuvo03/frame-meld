@@ -13,4 +13,8 @@ def get_speech_provider() -> SpeechProvider:
         from framemeld.providers.speech.gemini import GeminiSpeechProvider
 
         return GeminiSpeechProvider()
+    if settings.speech_provider == "kokoro":
+        from framemeld.providers.speech.kokoro import KokoroSpeechProvider
+
+        return KokoroSpeechProvider()
     raise ValueError(f"Unknown SPEECH_PROVIDER: {settings.speech_provider!r}")

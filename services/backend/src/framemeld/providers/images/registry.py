@@ -15,4 +15,8 @@ def get_image_provider() -> ImageProvider:
         from framemeld.providers.images.gemini import GeminiImageProvider
 
         return GeminiImageProvider()
+    if settings.image_provider == "comfyui":
+        from framemeld.providers.images.comfyui import ComfyUIImageProvider
+
+        return ComfyUIImageProvider()
     raise ValueError(f"Unknown IMAGE_PROVIDER: {settings.image_provider!r}")

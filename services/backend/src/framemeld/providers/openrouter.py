@@ -14,7 +14,15 @@ from framemeld.providers.base import (
 #: Generous, because a 30-shot script from a free-tier model is slow. The
 #: connect timeout stays short: a host that will not answer the handshake
 #: is not going to answer the completion either.
-_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+#:
+#: Raised from 120s on 2026-09-20, when this adapter was first pointed at a
+#: local model. Qwen3-8B-Q4_K_M on a 12GB card generates at roughly 40
+#: tok/s with thinking disabled, so a 30-shot script is a minute and a half
+#: of generation before the first byte of the reply is complete -- close
+#: enough to 120s that a normal script would have failed as a transport
+#: error while the model was working correctly. Costs a hosted provider
+#: nothing: a call that was going to fail simply takes longer to say so.
+_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
 #: Statuses worth another attempt. Everything else 4xx is a request we
 #: built wrong, or a key problem, and retrying changes neither.
@@ -39,7 +47,7 @@ class OpenRouterLLMProvider:
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": system},
+                {"role": "system", "content": system + settings.llm_system_suffix},
                 {"role": "user", "content": user},
             ],
             "response_format": {"type": "json_schema", "json_schema": json_schema},
