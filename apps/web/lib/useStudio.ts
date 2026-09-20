@@ -92,6 +92,9 @@ export function useStudio(id: string) {
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Not an error: an action that correctly did nothing, which otherwise
+  // looks exactly like an action that failed to happen at all.
+  const [notice, setNotice] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
 
   // A run of per-shot jobs, one at a time (M4-D5, M6-D11). One queue rather
@@ -109,7 +112,11 @@ export function useStudio(id: string) {
   }, []);
 
   const loadBalance = useCallback(
-    () => getBalance().then((result) => setBalance(result.balance), () => {}),
+    () =>
+      getBalance().then(
+        (result) => setBalance(result.balance),
+        () => {},
+      ),
     [],
   );
 
@@ -151,7 +158,10 @@ export function useStudio(id: string) {
     // Neither of these is worth a banner if it fails: the fallback prices
     // keep every button readable, and the voice list falls back to the one
     // value that must never be lost, the character's current voice.
-    getPricing().then((pricing) => setQuotes({ ...FALLBACK_QUOTES, ...pricing.quotes }), () => {});
+    getPricing().then(
+      (pricing) => setQuotes({ ...FALLBACK_QUOTES, ...pricing.quotes }),
+      () => {},
+    );
     getVoices(id).then(setVoices, () => {});
   }, [id, loadAll, loadBalance]);
 
@@ -206,13 +216,23 @@ export function useStudio(id: string) {
   const start = useCallback(
     async (request: () => Promise<Job>) => {
       setActionError(null);
+      setNotice(null);
       try {
         const started = await request();
         // A cache hit comes back already succeeded: these exact inputs were
         // generated before, so there is nothing to poll and nothing was
         // charged.
-        if (started.state === "succeeded") await loadAll();
-        else setJobId(started.id);
+        //
+        // It is also indistinguishable, on screen, from a button that does
+        // not work: no job starts, no progress appears, and the refetch puts
+        // back exactly what was already there. Say so, or the correct
+        // behaviour reads as a bug — which is how it was reported.
+        if (started.state === "succeeded") {
+          setNotice(
+            "Nothing has changed since this was last generated, so it was not run again — and nothing was charged.",
+          );
+          await loadAll();
+        } else setJobId(started.id);
         await loadBalance();
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) routerRef.current.replace("/login");
@@ -295,6 +315,7 @@ export function useStudio(id: string) {
     loadError,
     actionError,
     setActionError,
+    notice,
     job,
     busy: jobId !== null || remaining > 0,
     remaining,

@@ -18,8 +18,8 @@ export function ScriptStage({ studio, script }: { studio: Studio; script: Script
       summary={
         script.scenes.length > 0 ? (
           <span className="font-mono tabular-nums">
-            {script.scenes.length} {script.scenes.length === 1 ? "scene" : "scenes"} ·{" "}
-            {shotCount} {shotCount === 1 ? "shot" : "shots"}
+            {script.scenes.length} {script.scenes.length === 1 ? "scene" : "scenes"} · {shotCount}{" "}
+            {shotCount === 1 ? "shot" : "shots"}
           </span>
         ) : null
       }
@@ -37,6 +37,13 @@ export function ScriptStage({ studio, script }: { studio: Studio; script: Script
               ? "Write it again"
               : "Write the script"}
         </button>
+      }
+      working={
+        writing
+          ? job?.state === "running"
+            ? "Writing the shot list… this replaces every scene and shot below."
+            : "Queued — the shot list is about to be written."
+          : null
       }
       notices={
         script.stale_shots > 0 ? (

@@ -57,7 +57,7 @@ function useCurrentStage(ready: boolean): StageId {
 export default function StudioPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const studio = useStudio(id);
-  const { meld, script, cast, shots, film, loadError, actionError } = studio;
+  const { meld, script, cast, shots, film, loadError, actionError, notice } = studio;
 
   const ready =
     meld !== null && script !== null && cast !== null && shots !== null && film !== null;
@@ -133,6 +133,15 @@ export default function StudioPage({ params }: { params: Promise<{ id: string }>
             className="rounded border border-danger/40 bg-panel px-4 py-3 text-sm text-danger"
           >
             {actionError}
+          </p>
+        )}
+
+        {notice && (
+          <p
+            role="status"
+            className="rounded border border-subtle bg-panel px-4 py-3 text-sm text-body"
+          >
+            {notice}
           </p>
         )}
 

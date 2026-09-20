@@ -8,7 +8,14 @@ from framemeld.models.script import MAX_SHOT_SECONDS, MAX_SHOTS, Scene, Shot
 # Bump whenever the prompt template or the JSON schema changes in a way that
 # would produce a different script from the same story. It is part of
 # SCRIPT_PARAMS, so bumping it correctly marks every existing script stale.
-PROMPT_VERSION = 1
+#
+# 2 (2026-09-20): _SYSTEM gained the rule that `dialogue_kind` and
+# `speech_text` are one decision, and the instruction to carry the story with
+# narration. That changes the script produced from an unchanged story, which
+# is exactly what this number is for -- and until it was bumped, pressing
+# "Write it again" returned the already-succeeded job for the old hash and
+# looked like a button that did nothing.
+PROMPT_VERSION = 2
 
 # Imported rather than restated: a drifted copy would leave the hash
 # describing parameters that were not used (R1).

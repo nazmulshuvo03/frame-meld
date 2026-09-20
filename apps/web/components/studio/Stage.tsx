@@ -31,6 +31,7 @@ export function Stage({
   summary,
   action,
   notices,
+  working,
   children,
 }: {
   id: StageId;
@@ -42,6 +43,14 @@ export function Stage({
   summary?: ReactNode;
   action?: ReactNode;
   notices?: ReactNode;
+  /** What is being made right now, if this stage is the one making it.
+   *
+   *  While it is set, this stage's contents are held behind it: what is on
+   *  screen is about to be replaced wholesale, so leaving it editable
+   *  invites edits that are about to be thrown away, and leaving it looking
+   *  ordinary makes a job that takes a minute look like a button that did
+   *  nothing. */
+  working?: string | null;
   children: ReactNode;
 }) {
   const current = useContext(CurrentStageContext) === id;
@@ -90,7 +99,42 @@ export function Stage({
 
         {notices && <div className="mt-4 flex flex-col gap-3">{notices}</div>}
 
-        <div className="mt-6">{children}</div>
+        <div className="mt-6">
+          {working && (
+            // Sticky, not pinned to the top of the section: a stage can be
+            // several screens long, and a message that only exists at the
+            // top of it is invisible from exactly the place the user pressed
+            // the button. It sits under the transport bar and this stage's
+            // own header, and rides down the whole stage.
+            <div
+              className="sticky z-10 mb-4 flex justify-center"
+              style={{ top: "calc(var(--transport-h, 87px) + 4rem)" }}
+            >
+              <p
+                role="status"
+                aria-live="polite"
+                className="flex items-center gap-2.5 rounded-lg border border-subtle bg-panel px-4 py-3 text-sm text-foreground shadow-lg"
+              >
+                <span
+                  aria-hidden
+                  className="size-1.5 shrink-0 rounded-full bg-signal motion-safe:animate-pulse"
+                />
+                {working}
+              </p>
+            </div>
+          )}
+
+          <div
+            aria-busy={Boolean(working)}
+            className={working ? "pointer-events-none select-none opacity-25" : undefined}
+            // Held behind the veil rather than unmounted: seeing what is
+            // about to be replaced, greyed, says more than an empty box or a
+            // skeleton of a shape the result may not even have.
+            inert={working ? true : undefined}
+          >
+            {children}
+          </div>
+        </div>
       </div>
     </section>
   );
