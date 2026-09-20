@@ -169,7 +169,12 @@ export function TransportBar({
 
       <nav
         aria-label="Stages"
-        className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-6 pb-2 text-sm"
+        // `overflow-x-auto` (for narrow screens) forces overflow-y to auto
+        // too, so this strip clips its own contents vertically. With no top
+        // padding the current stage's pill sat exactly on that line and had
+        // its top edge and ring shaved off. The padding is the headroom the
+        // ring needs, not spacing.
+        className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-6 pt-1 pb-2 text-sm"
       >
         {stages.map((stage) => {
           const active = stage.id === current;
