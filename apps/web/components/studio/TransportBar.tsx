@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { CancelButton } from "@/components/CancelButton";
 import type { Job } from "@/lib/api";
@@ -85,8 +86,39 @@ export function TransportBar({
 }) {
   const progress = job?.progress_pct ?? null;
 
+  // Publish this bar's height so each stage's own header can stick directly
+  // underneath it. It is not a constant: the row wraps at narrow widths, and
+  // the activity and cancel controls appear only while something is running,
+  // so a hard-coded offset is wrong at exactly the moments the user is
+  // watching the page most closely.
+  const barRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const publish = () =>
+      document.documentElement.style.setProperty(
+        "--transport-h",
+        `${Math.round(bar.getBoundingClientRect().height)}px`,
+      );
+    publish();
+    // jsdom has no ResizeObserver, and the stage headers only need the
+    // measurement to be right in a real browser — the fallback keeps the
+    // published value correct across the one thing that changes the bar's
+    // height without a re-render.
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", publish);
+      return () => window.removeEventListener("resize", publish);
+    }
+    const observer = new ResizeObserver(publish);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <header className="sticky top-0 z-20 border-b border-subtle bg-background/95 backdrop-blur">
+    <header
+      ref={barRef}
+      className="sticky top-0 z-20 border-b border-subtle bg-background/95 backdrop-blur"
+    >
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3">
         <Link
           href="/melds"
@@ -146,8 +178,15 @@ export function TransportBar({
               key={stage.id}
               href={`#${stage.id}`}
               aria-current={active ? "step" : undefined}
+              // The current stage was `bg-panel text-foreground`, which on a
+              // near-black page is a 13% lightness step nobody can see. It is
+              // the answer to "where am I", so it is now also ringed and set
+              // in medium — three cues rather than one that only reads on a
+              // calibrated monitor.
               className={`flex items-center gap-2 rounded px-2.5 py-1 whitespace-nowrap transition-colors ${
-                active ? "bg-panel text-foreground" : "text-muted hover:text-foreground"
+                active
+                  ? "bg-panel font-medium text-foreground ring-1 ring-strong/60"
+                  : "text-muted hover:text-foreground"
               }`}
             >
               {/* Filled once the stage has something in it, amber when some

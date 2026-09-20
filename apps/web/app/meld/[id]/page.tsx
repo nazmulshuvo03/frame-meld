@@ -5,6 +5,7 @@ import { CastStage } from "@/components/studio/CastStage";
 import { FilmStage } from "@/components/studio/FilmStage";
 import { ScriptStage } from "@/components/studio/ScriptStage";
 import { ShotsStage } from "@/components/studio/ShotsStage";
+import { CurrentStageContext } from "@/components/studio/Stage";
 import { StoryStage } from "@/components/studio/StoryStage";
 import { TransportBar, type StageId, type StageMark } from "@/components/studio/TransportBar";
 import { useStudio } from "@/lib/useStudio";
@@ -58,7 +59,8 @@ export default function StudioPage({ params }: { params: Promise<{ id: string }>
   const studio = useStudio(id);
   const { meld, script, cast, shots, film, loadError, actionError } = studio;
 
-  const ready = meld !== null && script !== null && cast !== null && shots !== null && film !== null;
+  const ready =
+    meld !== null && script !== null && cast !== null && shots !== null && film !== null;
   const current = useCurrentStage(ready);
 
   if (loadError) {
@@ -104,8 +106,7 @@ export default function StudioPage({ params }: { params: Promise<{ id: string }>
       id: "film",
       label: "Film",
       done: film.final?.asset_id ? 1 : film.preview?.asset_id ? 1 : 0,
-      stale:
-        (film.final?.state === "stale" ? 1 : 0) + (film.preview?.state === "stale" ? 1 : 0),
+      stale: (film.final?.state === "stale" ? 1 : 0) + (film.preview?.state === "stale" ? 1 : 0),
     },
   ];
 
@@ -125,21 +126,23 @@ export default function StudioPage({ params }: { params: Promise<{ id: string }>
         onStop={studio.stopEverything}
       />
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-6">
+      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-6 py-6">
         {actionError && (
           <p
             role="alert"
-            className="mt-6 rounded border border-danger/40 bg-panel px-4 py-3 text-sm text-danger"
+            className="rounded border border-danger/40 bg-panel px-4 py-3 text-sm text-danger"
           >
             {actionError}
           </p>
         )}
 
-        <StoryStage meldId={id} meld={meld} />
-        <ScriptStage studio={studio} script={script} />
-        <CastStage studio={studio} cast={cast} />
-        <ShotsStage studio={studio} shots={shots} />
-        <FilmStage studio={studio} film={film} shots={shots} />
+        <CurrentStageContext.Provider value={current}>
+          <StoryStage meldId={id} meld={meld} />
+          <ScriptStage studio={studio} script={script} />
+          <CastStage studio={studio} cast={cast} />
+          <ShotsStage studio={studio} shots={shots} />
+          <FilmStage studio={studio} film={film} shots={shots} />
+        </CurrentStageContext.Provider>
       </main>
     </>
   );
