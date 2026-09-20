@@ -109,51 +109,64 @@ export default function MeldsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl p-8">
-      <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">My Melds</h1>
-        <div className="flex items-center gap-4">
+    <>
+      {/* The same shell the studio wears: sticky, one hairline rule, the
+          content on the same 5xl column. This page used to be 2xl and
+          unbordered, so crossing into a Meld re-laid the whole window out
+          and the two screens read as two products. */}
+      <header className="sticky top-0 z-20 border-b border-subtle bg-background/95 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center gap-x-6 gap-y-2 px-6 py-3">
+          <span className="text-base font-medium" aria-hidden>
+            FrameMeld
+          </span>
+          <h1 className="mr-auto text-base text-muted">My Melds</h1>
           <button
             onClick={onNewMeld}
             disabled={creating}
-            className="rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
+            className="rounded bg-accent px-3.5 py-1.5 text-sm text-accent-foreground disabled:opacity-50"
           >
             New Meld
           </button>
-          <button onClick={onLogout} className="text-sm text-body hover:underline">
+          <button onClick={onLogout} className="text-sm text-muted hover:text-foreground">
             Log out
           </button>
         </div>
       </header>
 
-      {loadError && (
-        <p role="alert" className="mb-6 text-sm text-danger">
-          {loadError}
-        </p>
-      )}
+      <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
+        {loadError && (
+          <p role="alert" className="mb-6 text-sm text-danger">
+            {loadError}
+          </p>
+        )}
 
-      {melds === null && !loadError && <p className="text-sm text-muted">Loading…</p>}
+        {melds === null && !loadError && <p className="text-sm text-muted">Loading…</p>}
 
-      {melds !== null && melds.length === 0 && (
-        <div className="rounded border border-dashed border-strong p-12 text-center">
-          <p className="mb-4 text-body">You haven&apos;t started a Meld yet.</p>
-          <button
-            onClick={onNewMeld}
-            disabled={creating}
-            className="rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
-          >
-            Write your first story
-          </button>
-        </div>
-      )}
+        {melds !== null && melds.length === 0 && (
+          <div className="rounded-lg border border-dashed border-strong px-6 py-20 text-center">
+            <p className="text-lg font-medium">You haven&apos;t started a Meld yet.</p>
+            <p className="mx-auto mt-2 max-w-prose text-sm text-body">
+              Write a story in your own words. Everything after it — the shot list, the cast, the
+              stills and the film — is made from that.
+            </p>
+            <button
+              onClick={onNewMeld}
+              disabled={creating}
+              className="mt-6 rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
+            >
+              Write your first story
+            </button>
+          </div>
+        )}
 
-      {melds !== null && melds.length > 0 && (
-        <ul className="flex flex-col gap-3">
-          {melds.map((meld) => (
-            <MeldCard key={meld.id} meld={meld} onRename={onRename} onDelete={onDelete} />
-          ))}
-        </ul>
-      )}
-    </main>
+        {melds !== null && melds.length > 0 && (
+          <ul className="grid gap-4 sm:grid-cols-2">
+            {melds.map((meld) => (
+              <MeldCard key={meld.id} meld={meld} onRename={onRename} onDelete={onDelete} />
+            ))}
+          </ul>
+        )}
+      </main>
+    </>
   );
 }

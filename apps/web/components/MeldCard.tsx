@@ -4,13 +4,20 @@ import { useState } from "react";
 import Link from "next/link";
 import type { MeldSummary } from "@/lib/api";
 
-const STAGE_LABELS: Record<string, string> = {
-  story: "Story",
-  script: "Script",
-  cast: "Cast",
-  shots: "Shots",
-  film: "Film",
-};
+/** The five stages in the order a Meld passes through them.
+ *
+ *  The same five the transport bar lists, and in the same order, because
+ *  they are the same five states of the same artifact — a card that ordered
+ *  them differently would teach the wrong shape of the product before the
+ *  user ever opens one.
+ */
+const STAGES = [
+  { id: "story", label: "Story" },
+  { id: "script", label: "Script" },
+  { id: "cast", label: "Cast" },
+  { id: "shots", label: "Shots" },
+  { id: "film", label: "Film" },
+] as const;
 
 export function MeldCard({
   meld,
@@ -34,9 +41,15 @@ export function MeldCard({
     setEditing(false);
   }
 
+  // How far this Meld has got. `stage` is a single word on the wire, so this
+  // is the only thing a card can honestly say: reached, not "finished" and
+  // not a count of what is inside.
+  const reached = STAGES.findIndex((stage) => stage.id === meld.stage);
+  const current = STAGES[reached] ?? null;
+
   return (
-    <li className="flex items-center justify-between rounded border border-subtle p-4">
-      <div className="min-w-0">
+    <li className="relative flex flex-col rounded-lg border border-subtle bg-panel transition-colors hover:border-strong">
+      <div className="flex-1 p-5">
         {editing ? (
           <input
             autoFocus
@@ -51,20 +64,57 @@ export function MeldCard({
                 setEditing(false);
               }
             }}
-            className="rounded border border-strong px-2 py-1"
+            className="w-full rounded border border-strong px-2 py-1 text-lg font-medium focus:border-edge-focus focus:outline-none"
           />
         ) : (
-          <Link href={`/meld/${meld.id}`} className="block truncate font-medium hover:underline">
+          // The whole card face is the target, not just the words: a list of
+          // films is clicked at, and a 16px-tall hit area in a 200px-wide
+          // card is a mouse-accuracy test.
+          <Link
+            href={`/meld/${meld.id}`}
+            className={
+              "block truncate text-lg font-medium after:absolute after:inset-0 after:content-['']" +
+              " focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-edge-focus"
+            }
+          >
             {meld.title}
           </Link>
         )}
-        <p className="mt-1 text-xs text-muted">
-          {STAGE_LABELS[meld.stage] ?? meld.stage} · updated{" "}
-          {new Date(meld.updated_at).toLocaleDateString()}
+
+        {/* The five stages as the transport bar draws them, so the card and
+            the studio agree about what a filled dot means. Filled up to the
+            stage this Meld has reached, hollow after it. */}
+        <div className="mt-4 flex items-center gap-1.5" aria-hidden>
+          {STAGES.map((stage, index) => (
+            <span
+              key={stage.id}
+              className={`h-1 flex-1 rounded-full ${
+                index <= reached ? "bg-signal" : "bg-subtle ring-1 ring-strong/40"
+              }`}
+            />
+          ))}
+        </div>
+
+        <p className="mt-2.5 flex items-center gap-2 text-xs text-muted">
+          <span>{current ? current.label : meld.stage}</span>
+          <span className="text-faint" aria-hidden>
+            ·
+          </span>
+          <span className="font-mono tabular-nums text-faint">{meld.aspect_ratio}</span>
+          <span className="ml-auto font-mono tabular-nums text-faint">
+            {new Date(meld.updated_at).toLocaleDateString()}
+          </span>
         </p>
       </div>
 
-      <div className="flex shrink-0 gap-3 text-sm">
+      {/* Rename and Delete sit below the card's own edge rather than beside
+          the title: they act on the Meld, they are not part of reading it.
+          Kept in the document at all times — revealing them on hover alone
+          would put them out of reach of a keyboard and of every touch
+          screen. Delete stays quiet until it is pointed at; permanent red
+          gives a destructive action the loudest colour on a page where
+          nothing is wrong. */}
+      <div className="relative z-10 flex gap-4 border-t border-subtle px-5 py-2.5 text-xs">
         <button
           onClick={() => {
             // Reset the draft before opening. Without this, a rename that
@@ -72,11 +122,14 @@ export function MeldCard({
             setDraftTitle(meld.title);
             setEditing(true);
           }}
-          className="text-body hover:underline"
+          className="text-muted hover:text-foreground"
         >
           Rename
         </button>
-        <button onClick={() => onDelete(meld.id)} className="text-danger hover:underline">
+        <button
+          onClick={() => onDelete(meld.id)}
+          className="text-muted hover:text-danger focus-visible:text-danger"
+        >
           Delete
         </button>
       </div>
