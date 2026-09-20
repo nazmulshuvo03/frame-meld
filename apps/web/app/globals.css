@@ -132,6 +132,19 @@ html {
   }
 }
 
+/* Tailwind v4 dropped the preflight rule that gave buttons a pointer
+ * cursor, so every button in the app has been showing the default arrow —
+ * the one thing that tells a mouse user a thing is clickable before they
+ * click it. Set once here rather than as a `cursor-pointer` class on each
+ * of them, which is the same argument as the palette above: one rule or a
+ * hundred places to forget it. `:disabled` keeps the arrow, since a
+ * disabled control is exactly the one that is not clickable. */
+button:not(:disabled),
+summary,
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
 /* Form controls do not inherit the page's colours on their own, and a
  * textarea left alone renders white-on-white in dark mode with a caret
  * nobody can find. Set here rather than per component: the autosaving story

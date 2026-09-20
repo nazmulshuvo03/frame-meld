@@ -380,3 +380,37 @@ async def test_an_unforeseen_exception_still_leaves_the_job_actionable(db, monke
     reloaded = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one()
     assert reloaded.state is JobState.FAILED
     assert reloaded.error
+
+
+def _one_shot_script(**shot: object) -> str:
+    """A minimal well-formed script whose single shot carries `shot`."""
+    import json
+
+    base = {"image_prompt": "A foundry at night", "duration_sec": "5.00"}
+    return json.dumps({"scenes": [{"shots": [{**base, **shot}]}]})
+
+
+def test_a_dialogue_kind_with_no_words_becomes_none():
+    """Probed against Qwen3-8B: it returned all fourteen shots of a script
+    as off_screen with an empty speech_text. Both fields are individually
+    valid, so nothing rejected it, and the result was a silent film whose
+    Shots page showed an empty speech box on every shot."""
+    parsed = parse_script(_one_shot_script(dialogue_kind="off_screen", speech_text=""))
+    assert parsed.scenes[0].shots[0].dialogue_kind.value == "none"
+
+
+def test_words_with_no_dialogue_kind_become_narration():
+    """The other direction: lines that would otherwise never be recorded."""
+    parsed = parse_script(
+        _one_shot_script(dialogue_kind="none", speech_text="The foundry had been cold nine years.")
+    )
+    assert parsed.scenes[0].shots[0].dialogue_kind.value == "narration"
+
+
+def test_a_kind_that_agrees_with_its_words_is_left_alone():
+    parsed = parse_script(
+        _one_shot_script(dialogue_kind="off_screen", speech_text="Why did you come back?")
+    )
+    shot = parsed.scenes[0].shots[0]
+    assert shot.dialogue_kind.value == "off_screen"
+    assert shot.speech_text == "Why did you come back?"

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
@@ -107,7 +107,15 @@ not read the story, so name what is visible rather than referring back.
 - Prefer narration, reaction shots and off-screen dialogue. Characters' mouths \
 cannot be synchronised to speech, so on-screen dialogue looks wrong. Use \
 `dialogue_kind: "on_screen"` only when nothing else will carry the moment.
-- `speech_text` is what is heard over the shot, and empty when nothing is.
+- `dialogue_kind` and `speech_text` are one decision, not two. A shot whose \
+`dialogue_kind` is anything but `"none"` MUST carry the words in \
+`speech_text`; a shot with nothing heard over it MUST be \
+`dialogue_kind: "none"`. A dialogue kind with an empty `speech_text` is a \
+silent shot wearing a label, and is never what was meant.
+- Unless the story is wordless, carry it with narration: most shots that \
+advance the story should have `dialogue_kind: "narration"` and the line to \
+be read in `speech_text`. A film with no `speech_text` anywhere is a silent \
+film.
 - Aim for 10 to 30 shots in total. Do not pad a short story.
 """
 
@@ -205,6 +213,33 @@ class DraftShot(BaseModel):
             return DialogueKind(value)
         except ValueError:
             return DialogueKind.NONE
+
+    @model_validator(mode="after")
+    def _dialogue_and_speech_agree(self) -> "DraftShot":
+        """A dialogue kind and the words are one fact, so make them one here.
+
+        Probed 2026-09-20: Qwen3-8B returned all fourteen shots of a script
+        as `dialogue_kind: "off_screen"` with `speech_text: ""`. Nothing
+        rejected it -- both fields were individually valid -- and the result
+        was a film the Shots stage renders with a speech field the user can
+        see is empty on every single shot, and a Preview with no narration
+        in it. Reconciled rather than rejected, on the same trade as
+        `_clamp_duration`: one field's fidelity is worth less than the whole
+        script.
+
+        The prompt above now states the pairing as an invariant, which is
+        what actually gets narration written. This is the guard for when a
+        model ignores it, which is the normal case rather than the
+        exception.
+        """
+        if not self.speech_text.strip():
+            # Labelled but silent. The label is the part that is wrong.
+            self.dialogue_kind = DialogueKind.NONE
+        elif self.dialogue_kind is DialogueKind.NONE:
+            # Words with nowhere to come from. Narration is what the prompt
+            # asks for by default and the only kind that needs no speaker.
+            self.dialogue_kind = DialogueKind.NARRATION
+        return self
 
 
 class DraftScene(BaseModel):
