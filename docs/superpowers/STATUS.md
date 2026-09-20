@@ -113,6 +113,28 @@ dominates:
    $0.20–0.30 a clip this is the only step that costs real money; a 6-shot film
    is ~$1.50 and a 30-shot one is ~$7.
 
+**Steps 1–3 have now been done for free**, on 2026-09-20, against the local
+providers in [`local-dev-providers.md`](local-dev-providers.md) rather than
+against Gemini. A 5-shot Meld ran script → stills → speech → Preview through
+Qwen3, SDXL-Turbo and Kokoro, every job `succeeded` with `cost_usd` 0:
+
+- **Script**: 72.1 s against the stub's 0.1 s, and the shots come back as
+  descriptions of a frame ("A woman in a dark coat climbs a spiral staircase
+  inside a lighthouse") rather than the story's own sentences. `json_schema`
+  held on a llama.cpp-backed server.
+- **Stills**: 107 s for the first image after a container start, ~5 s a shot
+  after that, all five redrawn from the Shots page.
+- **Speech**: 2.42 s and 1.94 s — the durations the audio actually is, which
+  is what asking Kokoro for `pcm` instead of `wav` buys.
+- **Preview**: 19.0 s at 1280×720, and the Ken Burns numbers in `render/spec.py`
+  read as a slow push into a real photograph, not as a wobble. That was the one
+  question only a real still could answer, and it is answered.
+
+What this does **not** cover: Gemini's own behaviour on the same path (the
+casting pass's "seen in the frame" question is a question about the hosted
+model's judgement, and a local checkpoint ignores `refs` entirely), music, and
+video. Step 4 is unchanged and still costs what it costs.
+
 ### 2. Stripe (spec §10, deliberately deferred)
 A film costs ~2,900 credits against a 500-credit signup grant, so
 `grant_credits` is no longer a convenience — it is the only way to finish one.
