@@ -210,10 +210,6 @@ async def build_scene_spec(db: DbSession, meld_id: uuid.UUID, kind: RenderKind) 
         raise NothingToRender("Generate the script first — there are no shots to assemble.")
 
     stills = await _stills_by_shot(db, [shot.id for shot in shots])
-    missing = [shot for shot in shots if shot.id not in stills]
-    if missing:
-        raise MissingStills(len(missing), len(shots))
-
     speech = await _speech_by_shot(db, [shot.id for shot in shots])
     music = await _music_clip(db, meld_id)
 
@@ -227,10 +223,16 @@ async def build_scene_spec(db: DbSession, meld_id: uuid.UUID, kind: RenderKind) 
         absent = [shot for shot in shots if shot.id not in clips]
         if absent:
             raise MissingClips(len(absent), len(shots))
+        # A Final plays the clips, so a shot needs no still of its own: a
+        # clip can be made from the script alone.
+    else:
+        missing = [shot for shot in shots if shot.id not in stills]
+        if missing:
+            raise MissingStills(len(missing), len(shots))
 
     spec_shots = []
     for index, shot in enumerate(shots):
-        still = stills[shot.id]
+        still = stills.get(shot.id)
         clip = speech.get(shot.id)
         video = clips.get(shot.id)
         motion_from, motion_to = ken_burns(shot, index)
@@ -238,10 +240,10 @@ async def build_scene_spec(db: DbSession, meld_id: uuid.UUID, kind: RenderKind) 
             SpecShot(
                 shot_id=shot.id,
                 duration_sec=float(shot.duration_sec),
-                # Not Optional: _stills_by_shot filtered on asset_id above,
-                # and the missing check ran before this loop.
-                still_asset_id=still.asset_id,  # type: ignore[arg-type]
-                still_content_hash=still.content_hash,
+                # _stills_by_shot filtered on asset_id, and a Preview refused
+                # a missing still above; only a Final can reach here without.
+                still_asset_id=None if still is None else still.asset_id,
+                still_content_hash=None if still is None else still.content_hash,
                 clip_asset_id=None if video is None else video.asset_id,
                 clip_content_hash=None if video is None else video.content_hash,
                 motion_from=motion_from,

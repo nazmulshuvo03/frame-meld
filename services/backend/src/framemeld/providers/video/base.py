@@ -7,7 +7,9 @@ class VideoProvider(Protocol):
     """Spec section 3.3's third adapter, and the expensive one.
 
     `animate` takes an image and a description of how it should move --
-    never a description of what to draw. Image-to-video is the whole design
+    never a description of what to draw. `image=None` is the exception: a
+    clip made from the script alone, where `motion_prompt` carries the whole
+    description of the frame as well as its movement. Image-to-video is the whole design
     (spec section 4.2): a clip is conditioned on a still the user has
     already approved, which is what bounds character drift to within a
     single five-second shot rather than across a film.
@@ -24,5 +26,10 @@ class VideoProvider(Protocol):
     model: str
 
     async def animate(
-        self, *, image: bytes, motion_prompt: str, duration_sec: float, params: dict[str, Any]
+        self,
+        *,
+        image: bytes | None,
+        motion_prompt: str,
+        duration_sec: float,
+        params: dict[str, Any],
     ) -> ProviderResult: ...

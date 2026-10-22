@@ -28,7 +28,8 @@ export type SpecAudio = {
 export type SpecShot = {
   id: string;
   duration_sec: number;
-  still_url: string;
+  /** Null in a Final for a shot whose clip was made from the script alone. */
+  still_url: string | null;
   /** Null in a preview. M6 fills it, and the composition will read it
    *  instead of the still (§4.2). */
   clip_url: string | null;
@@ -68,7 +69,9 @@ export function validateSpec(value: unknown): SceneSpec {
     throw new Error("The scene spec is missing fps or a frame size.");
   }
   for (const shot of spec.shots) {
-    if (!shot.still_url) throw new Error(`Shot ${shot.id} has no still.`);
+    if (!shot.still_url && !shot.clip_url) {
+      throw new Error(`Shot ${shot.id} has neither a still nor a clip.`);
+    }
     if (!(shot.duration_sec > 0)) throw new Error(`Shot ${shot.id} has no duration.`);
   }
   return spec;

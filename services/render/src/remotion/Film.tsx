@@ -67,7 +67,7 @@ const Shot: React.FC<{ shot: SpecShot; fps: number }> = ({ shot, fps }) => {
         <OffthreadVideo src={shot.clip_url} style={fill} muted />
       ) : (
         <Img
-          src={shot.still_url}
+          src={shot.still_url ?? ""}
           style={{
             ...fill,
             transform: `scale(${zoom}) translate(${at(fromX, toX) * 100}%, ${

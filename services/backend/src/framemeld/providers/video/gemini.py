@@ -114,17 +114,15 @@ class VeoVideoProvider:
         )
 
     @staticmethod
-    def _request_payload(image: bytes, motion_prompt: str, seconds: int) -> dict[str, Any]:
+    def _request_payload(image: bytes | None, motion_prompt: str, seconds: int) -> dict[str, Any]:
+        instance: dict[str, Any] = {"prompt": motion_prompt}
+        if image is not None:
+            instance["image"] = {
+                "bytesBase64Encoded": base64.b64encode(image).decode(),
+                "mimeType": "image/png",
+            }
         return {
-            "instances": [
-                {
-                    "prompt": motion_prompt,
-                    "image": {
-                        "bytesBase64Encoded": base64.b64encode(image).decode(),
-                        "mimeType": "image/png",
-                    },
-                }
-            ],
+            "instances": [instance],
             # durationSeconds only. aspectRatio is deliberately absent: a
             # probe with no parameters answered 1280x720 from a 16:9 still,
             # so the default is already right, and a parameter that was
@@ -147,7 +145,7 @@ class VeoVideoProvider:
                 f"The video model rejected the request ({response.status_code})."
             )
 
-    async def _submit(self, image: bytes, motion_prompt: str, seconds: int) -> str:
+    async def _submit(self, image: bytes | None, motion_prompt: str, seconds: int) -> str:
         url = f"{settings.gemini_base_url}/models/{self.model}:predictLongRunning"
         try:
             async with self._client(_TIMEOUT) as client:
@@ -251,9 +249,14 @@ class VeoVideoProvider:
         return response.content
 
     async def animate(
-        self, *, image: bytes, motion_prompt: str, duration_sec: float, params: dict[str, Any]
+        self,
+        *,
+        image: bytes | None,
+        motion_prompt: str,
+        duration_sec: float,
+        params: dict[str, Any],
     ) -> ProviderResult:
-        if not image:
+        if image is not None and not image:
             # Matches the stub's refusal: a real model handed no image would
             # refuse or bill for a generation from nothing, and refusing
             # keeps the failure honest and exercises the refund path.

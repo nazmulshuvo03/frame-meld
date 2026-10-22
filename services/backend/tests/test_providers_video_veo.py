@@ -300,3 +300,10 @@ async def test_live_video(monkeypatch):
     seconds = mp4_duration(result.bytes_)
     assert seconds is not None, "the clip is not a readable MP4"
     assert seconds >= 3.5
+
+
+def test_a_request_with_no_image_sends_only_the_prompt():
+    """A clip made from the script alone: the prompt carries the whole frame."""
+    payload = VeoVideoProvider._request_payload(None, "a quiet harbour at dawn", 4)
+    assert payload["instances"] == [{"prompt": "a quiet harbour at dawn"}]
+    assert payload["parameters"] == {"durationSeconds": 4}

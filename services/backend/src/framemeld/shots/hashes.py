@@ -253,6 +253,19 @@ def motion_hash_for_shot(shot: Shot) -> str:
     )
 
 
+def clip_source_hash(shot: Shot, still_content_hash: str | None) -> str:
+    """The second parent of a clip: the still's bytes, or, with no still, the
+    part of the shot a still would have been drawn from.
+
+    A clip made from the script alone is the one place a clip has no picture
+    to key on, and keying it on the shot's visual hash is the same rule seen
+    from the other side -- the model was handed the sentence, so rewording
+    the sentence must re-animate it. The two forms hash different `kind`s, so
+    adding a still later correctly reads as a different source.
+    """
+    return still_content_hash if still_content_hash is not None else visual_hash_for_shot(shot)
+
+
 def shot_clip_input_hash(shot_motion_hash: str, source_content_hash: str) -> str:
     """What would produce this clip right now.
 

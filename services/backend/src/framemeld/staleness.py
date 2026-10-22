@@ -32,6 +32,7 @@ from framemeld.render.hashes import (
 from framemeld.script.hashes import script_input_hash
 from framemeld.shots.hashes import (
     audio_clip_input_hash,
+    clip_source_hash,
     motion_hash_for_shot,
     shot_clip_input_hash,
     shot_image_input_hash,
@@ -215,9 +216,13 @@ async def recompute_staleness(db: DbSession, meld_id: uuid.UUID) -> StalenessRep
         shot = shots_by_id.get(video.shot_id)
         if shot is None:
             continue
+        # A clip with no source image was made from the script alone and
+        # keys on the shot's own visual hash; one with a source keys on that
+        # still's bytes, and a still that has gone reads as stale ("").
+        source = None if video.source_image_id is None else still_content.get(video.shot_id, "")
         changed += _reconcile(
             video,
-            shot_clip_input_hash(motion_hash_for_shot(shot), still_content.get(video.shot_id, "")),
+            shot_clip_input_hash(motion_hash_for_shot(shot), clip_source_hash(shot, source)),
             now,
         )
 

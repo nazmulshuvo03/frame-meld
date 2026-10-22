@@ -74,7 +74,7 @@ export function FilmStage({
   // it having loaded.
   const toAnimate = unanimated + film.clips_stale;
   const animateIds = (shots?.shots ?? [])
-    .filter((shot) => shot.still?.asset_id && shot.clip?.state !== "fresh")
+    .filter((shot) => shot.clip?.state !== "fresh")
     .map((shot) => shot.id);
 
   const rendering = (kind: string) =>
@@ -173,7 +173,7 @@ export function FilmStage({
 
           <Panel
             title="Clips"
-            lede={`Each still animated into a real video clip. This is the expensive part — ${clipCredits} credits a shot — so watch the preview first and be happy with the pacing before you spend it.`}
+            lede={`Each shot made into a real video clip, from its still if it has one and from the script alone if not. This is the expensive part — ${clipCredits} credits a shot — so watch the preview first and be happy with the pacing before you spend it.`}
             action={
               toAnimate > 0 ? (
                 <QuoteButton

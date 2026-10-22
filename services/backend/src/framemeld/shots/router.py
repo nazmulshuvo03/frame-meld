@@ -166,8 +166,8 @@ async def generate_clip(
 ):
     try:
         dispatch = await service.request_clip(db, user.id, meld_id, shot_id)
-    except service.NothingToAnimate as exc:
-        raise _unprocessable(exc.reason) from None
+    except Blocked as exc:
+        raise await _blocked(db, exc) from None
     except InsufficientCredits as exc:
         raise await _cannot_pay(db, exc) from None
     if dispatch is None:

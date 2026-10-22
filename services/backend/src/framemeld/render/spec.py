@@ -44,8 +44,10 @@ class SpecAudio:
 class SpecShot:
     shot_id: uuid.UUID
     duration_sec: float
-    still_asset_id: uuid.UUID
-    still_content_hash: str
+    #: None only in a Final, for a shot whose clip was made from the script
+    #: alone (the composition reads the clip and never the still).
+    still_asset_id: uuid.UUID | None
+    still_content_hash: str | None
     #: [x, y, zoom] at the start and at the end of the shot. Derived, never
     #: authored -- see ken_burns below.
     motion_from: tuple[float, float, float]
@@ -101,7 +103,11 @@ class SceneSpec:
                 {
                     "id": str(shot.shot_id),
                     "duration_sec": shot.duration_sec,
-                    "still_url": signed_asset_url(shot.still_asset_id),
+                    "still_url": (
+                        None
+                        if shot.still_asset_id is None
+                        else signed_asset_url(shot.still_asset_id)
+                    ),
                     # Filled only in a Final. The composition reads it
                     # instead of the still, and ignores `motion` when it is
                     # there (spec section 4.2) -- which is the whole

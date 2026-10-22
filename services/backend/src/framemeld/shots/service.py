@@ -22,13 +22,14 @@ from framemeld.models.shots import (
 )
 from framemeld.moderation.service import Blocked, check_and_record
 from framemeld.providers.speech.voices import DEFAULT_VOICE_ID
-from framemeld.shots.generation import shots_in_film_order
+from framemeld.shots.generation import clip_scene_prompt, shots_in_film_order
 from framemeld.shots.hashes import (
     CLIP_PARAMS,
     audio_clip_input_hash,
     cast_hash,
     casting_hash_for_character,
     casting_hash_for_shot,
+    clip_source_hash,
     motion_hash_for_shot,
     shot_characters_input_hash,
     shot_clip_input_hash,
@@ -64,26 +65,6 @@ class MissingSheets(Exception):
         self.reason = (
             f"Draw a character sheet for {joined} first — a still is drawn from the sheets, "
             "so a character without one would come out looking like somebody else."
-        )
-
-
-class NothingToAnimate(Exception):
-    """A clip was asked for on a shot with no drawn still (M6-D2).
-
-    Refused rather than generated: image-to-video is conditioned on a
-    picture, so there is literally nothing to send. A *stale* still is
-    allowed through -- spec section 11's mitigation for character drift is
-    that stills are approved before any clip is made, and a user animating
-    a still they can see on screen is that approval. Refusing on stale
-    would also make a Meld unfinishable after any upstream edit until every
-    still had been paid for again.
-    """
-
-    def __init__(self) -> None:
-        super().__init__("no still")
-        self.reason = (
-            "Draw this shot's still first — a clip is animated from the picture, "
-            "so there is nothing to animate yet."
         )
 
 
@@ -476,11 +457,15 @@ async def request_clip(
 ) -> JobDispatch | None:
     """Queue the one expensive generation in this product (M6).
 
-    No moderation call: the still this animates already passed the gate
+    With a still, no moderation call: the picture already passed the gate
     when it was drawn, and `motion_prompt` describes camera movement rather
     than content. A second classification of the same approved picture
     would be a second chance to refuse work the user has already paid to
     produce.
+
+    Without a still the clip is made from the script alone, so what the
+    model reads is `image_prompt` -- user-derived text that no gate has seen
+    yet -- and it is checked here, before the hold, like a still's would be.
     """
     meld = await get_meld(db, user_id, meld_id)
     if meld is None:
@@ -495,9 +480,18 @@ async def request_clip(
         )
     ).scalar_one_or_none()
     if still is None:
-        raise NothingToAnimate
+        # The whole prompt the model will read, not just the frame: with no
+        # picture to have vetted, the motion text is content too.
+        verdict = await check_and_record(
+            db, meld, f"{clip_scene_prompt(shot)}\n\n{shot.motion_prompt}"
+        )
+        if not verdict.allowed:
+            raise Blocked(verdict.reason or "This shot can't be used to generate a video.")
 
-    input_hash = shot_clip_input_hash(motion_hash_for_shot(shot), still.content_hash)
+    input_hash = shot_clip_input_hash(
+        motion_hash_for_shot(shot),
+        clip_source_hash(shot, None if still is None else still.content_hash),
+    )
 
     # One clip row per shot, rewritten in place on regeneration -- the same
     # rule as one still per shot. Created before the job so target_id is
@@ -509,7 +503,7 @@ async def request_clip(
     if clip is None:
         clip = ShotClip(
             shot_id=shot.id,
-            source_image_id=still.id,
+            source_image_id=None if still is None else still.id,
             duration_sec=shot.duration_sec,
             input_hash=input_hash,
             state=ArtifactState.GENERATING,
@@ -542,9 +536,16 @@ async def request_clip(
         # Rewritten here, not in the worker, for the reason M4's _load_refs
         # gives: these are what the hold was priced against, and the user
         # can edit the shot while the job sits in the queue.
-        clip.source_image_id = still.id
+        clip.source_image_id = None if still is None else still.id
         clip.duration_sec = shot.duration_sec
-        clip.params = {**CLIP_PARAMS, "motion_prompt": shot.motion_prompt}
+        clip.params = {
+            **CLIP_PARAMS,
+            "motion_prompt": shot.motion_prompt,
+            # Only with no still: the frame itself, since there is no
+            # picture to carry it. Read by the worker, from the row, for
+            # the same reason as motion_prompt.
+            **({} if still is not None else {"scene_prompt": clip_scene_prompt(shot)}),
+        }
         clip.state = ArtifactState.GENERATING
         clip.updated_at = now
         await db.flush()

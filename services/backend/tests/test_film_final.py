@@ -12,6 +12,7 @@ from framemeld.models.render import Render, RenderKind
 from framemeld.models.script import ArtifactState
 from framemeld.models.shots import ShotClip
 from framemeld.providers.base import ProviderRefusedError
+from framemeld.providers.video.stub import StubVideoProvider
 from framemeld.staleness import recompute_staleness
 from framemeld.worker import run_generate_shot_clip, run_render_final, run_render_preview
 
@@ -64,17 +65,75 @@ async def test_two_shots_get_two_different_clips(logged_in, db):
     assert len(assets) == len(await _clips(db))
 
 
-async def test_a_clip_before_the_still_is_refused_and_charges_nothing(logged_in, db):
-    """M6-D2: image-to-video is conditioned on a picture, so there is
-    literally nothing to send."""
+async def test_a_clip_can_be_made_from_the_script_alone(logged_in, db, monkeypatch):
+    """No still is not a refusal: the frame travels in the prompt, the clip
+    records that it has no source image, and the price is the same."""
     meld_id = await scripted(logged_in, db)
     before = await balance(db, await _user_id(db))
     shot = (await logged_in.get(f"/melds/{meld_id}/shots")).json()["shots"][0]
+    seen: dict = {}
 
-    response = await logged_in.post(f"/melds/{meld_id}/shots/{shot['id']}/clip")
-    assert response.status_code == 422
-    assert "still" in response.json()["detail"]
-    assert await balance(db, await _user_id(db)) == before
+    class _Recording:
+        name, model = "fake", "fake"
+
+        async def animate(self, *, image, motion_prompt, duration_sec, params):
+            seen.update(image=image, prompt=motion_prompt)
+            return await StubVideoProvider().animate(
+                image=image, motion_prompt=motion_prompt, duration_sec=duration_sec, params=params
+            )
+
+    monkeypatch.setattr("framemeld.worker.get_video_provider", lambda: _Recording())
+    started = await logged_in.post(f"/melds/{meld_id}/shots/{shot['id']}/clip")
+    assert started.status_code == 202
+    outcome = await run_generate_shot_clip(db, uuid.UUID(started.json()["id"]))
+    await db.commit()
+
+    assert outcome.state is JobState.SUCCEEDED
+    clip = (await db.execute(select(ShotClip))).scalar_one()
+    assert clip.source_image_id is None
+    assert clip.state is ArtifactState.FRESH
+    assert seen["image"] is None
+    assert shot["image_prompt"] in seen["prompt"]
+    assert shot["motion_prompt"] in seen["prompt"]
+    assert await balance(db, await _user_id(db)) == before - quote_for(JobKind.GENERATE_SHOT_CLIP)
+
+
+async def test_rewording_the_image_prompt_re_animates_a_clip_made_from_the_script(logged_in, db):
+    meld_id = await scripted(logged_in, db)
+    shot = (await logged_in.get(f"/melds/{meld_id}/shots")).json()["shots"][0]
+    started = await logged_in.post(f"/melds/{meld_id}/shots/{shot['id']}/clip")
+    await run_generate_shot_clip(db, uuid.UUID(started.json()["id"]))
+    await db.commit()
+
+    await logged_in.patch(
+        f"/melds/{meld_id}/shots/{shot['id']}", json={"image_prompt": "a different frame"}
+    )
+    await db.commit()
+
+    clip = (await db.execute(select(ShotClip))).scalar_one()
+    await db.refresh(clip)
+    assert clip.state is ArtifactState.STALE
+
+
+async def test_a_final_renders_from_clips_with_no_stills(logged_in, db, monkeypatch):
+    meld_id = await scripted(logged_in, db)
+    await grant(db, await _user_id(db), 3000, "test")
+    await db.commit()
+    for shot in (await logged_in.get(f"/melds/{meld_id}/shots")).json()["shots"]:
+        started = await logged_in.post(f"/melds/{meld_id}/shots/{shot['id']}/clip")
+        await run_generate_shot_clip(db, uuid.UUID(started.json()["id"]))
+        await db.commit()
+    client = _FakeRenderClient()
+    monkeypatch.setattr("framemeld.worker.get_render_client", lambda: client)
+
+    final = await logged_in.post(f"/melds/{meld_id}/film/final")
+    assert final.status_code == 202, final.text
+    outcome = await run_render_final(db, uuid.UUID(final.json()["id"]))
+
+    assert outcome.state is JobState.SUCCEEDED
+    assert all(shot["still_url"] is None and shot["clip_url"] for shot in client.specs[0]["shots"])
+    # The free preview still needs pictures to pan across.
+    assert (await logged_in.post(f"/melds/{meld_id}/film/preview")).status_code == 422
 
 
 async def test_a_clip_from_a_stale_still_is_allowed(logged_in, db):

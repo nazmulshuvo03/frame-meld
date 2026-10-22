@@ -111,9 +111,14 @@ class StubVideoProvider:
             return output.read_bytes()
 
     async def animate(
-        self, *, image: bytes, motion_prompt: str, duration_sec: float, params: dict[str, Any]
+        self,
+        *,
+        image: bytes | None,
+        motion_prompt: str,
+        duration_sec: float,
+        params: dict[str, Any],
     ) -> ProviderResult:
-        if not image:
+        if image is not None and not image:
             # A real model handed no image would refuse or bill for a
             # generation from nothing. Refusing keeps the failure honest and
             # exercises the refund path.
@@ -130,7 +135,7 @@ class StubVideoProvider:
         # would make the other look like it had no effect -- and the
         # staleness engine, which is downstream of these bytes, would then
         # be silently wrong about work the user had paid to redo.
-        digest = hashlib.sha256(image + b"\x00" + motion_prompt.encode()).hexdigest()[:6]
+        digest = hashlib.sha256((image or b"") + b"\x00" + motion_prompt.encode()).hexdigest()[:6]
 
         # to_thread because this runs inside the arq worker's event loop and
         # ffmpeg is a blocking subprocess -- the same reason LocalDiskStorage

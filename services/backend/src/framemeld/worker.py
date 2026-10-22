@@ -978,33 +978,43 @@ async def run_generate_shot_clip(db: DbSession, job_id: uuid.UUID) -> JobOutcome
         ).scalar_one_or_none()
     )
     meld = (await db.execute(select(Meld).where(Meld.id == job.meld_id))).scalar_one_or_none()
-    if clip is None or still is None or meld is None:
+    # No source image is a clip made from the script alone -- but only if the
+    # request said so by writing the frame into `scene_prompt`. A still that
+    # was deleted while this sat in the queue also leaves source_image_id
+    # null (ON DELETE SET NULL), and animating *that* from nothing would
+    # charge for a video of no particular frame.
+    scene_prompt = "" if clip is None else str(clip.params.get("scene_prompt", ""))
+    if clip is None or meld is None or (still is None and not scene_prompt):
         await mark_failed(db, job, "This shot no longer exists.")
         await _close_hold(db, job, succeeded=False)
         return JobOutcome(JobState.FAILED, retryable=False)
 
     provider = get_video_provider()
     try:
-        asset = (
-            None
-            if still.asset_id is None
-            else (
-                await db.execute(select(Asset).where(Asset.id == still.asset_id))
-            ).scalar_one_or_none()
-        )
-        if asset is None:
-            raise ProviderResponseError("The still this clip is made from has gone. Try again.")
-        try:
-            image = await get_storage().get(key=asset.storage_key)
-        except FileNotFoundError as exc:
-            raise ProviderResponseError(
-                "The still this clip is made from could not be read. Try again."
-            ) from exc
+        image: bytes | None = None
+        if still is not None:
+            asset = (
+                None
+                if still.asset_id is None
+                else (
+                    await db.execute(select(Asset).where(Asset.id == still.asset_id))
+                ).scalar_one_or_none()
+            )
+            if asset is None:
+                raise ProviderResponseError("The still this clip is made from has gone. Try again.")
+            try:
+                image = await get_storage().get(key=asset.storage_key)
+            except FileNotFoundError as exc:
+                raise ProviderResponseError(
+                    "The still this clip is made from could not be read. Try again."
+                ) from exc
 
+        motion = str(clip.params.get("motion_prompt", ""))
         result = await provider.animate(
             image=image,
             # From the row, like the image: what the hold was priced against.
-            motion_prompt=str(clip.params.get("motion_prompt", "")),
+            # With no image the frame has to travel in the prompt.
+            motion_prompt=motion if image is not None else f"{scene_prompt}\n\n{motion}".strip(),
             duration_sec=float(clip.duration_sec or 0),
             params=clip.params,
         )

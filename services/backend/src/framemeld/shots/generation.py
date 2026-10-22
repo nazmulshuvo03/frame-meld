@@ -232,6 +232,18 @@ def still_prompt(shot: Shot, named_refs: list[str]) -> str:
     return "\n\n".join(lines)
 
 
+def clip_scene_prompt(shot: Shot) -> str:
+    """What a clip is made from when there is no still to hand the model:
+    the camera and the frame, in the words the still would have been drawn
+    from. Covered by visual_hash_for_shot, like still_prompt."""
+    lines = []
+    framing = _CAMERA_FRAMING.get(shot.camera)
+    if framing:
+        lines.append(framing)
+    lines.append(shot.image_prompt.strip())
+    return "\n".join(lines)
+
+
 async def shots_in_film_order(db: DbSession, meld_id: uuid.UUID) -> list[Shot]:
     """Every shot in a Meld, in film order.
 
