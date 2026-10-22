@@ -6,9 +6,6 @@ import { StaleBadge } from "@/components/StaleBadge";
 import { CAMERA_ANGLES, DIALOGUE_KINDS, updateShot, type Shot } from "@/lib/api";
 import { useAutosave } from "@/lib/useAutosave";
 
-const FIELD =
-  "w-full rounded border border-subtle p-2 text-sm outline-none focus:border-edge-focus";
-
 export function ShotCard({
   meldId,
   shot: initial,
@@ -17,6 +14,7 @@ export function ShotCard({
   onDelete,
   canMoveUp,
   canMoveDown,
+  number,
 }: {
   meldId: string;
   shot: Shot;
@@ -27,6 +25,9 @@ export function ShotCard({
   onDelete: () => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
+  /** Its place in the whole film, which is how the shot list numbers it.
+   *  `order_index` only counts within its scene. */
+  number?: number;
 }) {
   // The card owns its shot after mount. The parent's copy is the value it
   // loaded with; re-syncing from the parent on every refetch would yank
@@ -57,9 +58,11 @@ export function ShotCard({
     setShot((current) => ({ ...current, [field]: value }));
 
   return (
-    <li className="rounded border border-subtle p-4">
-      <div className="mb-3 flex items-center gap-2 text-xs text-muted">
-        <span>Shot {shot.order_index + 1}</span>
+    <div className="flex flex-col">
+      <div className="mb-4 flex items-center gap-2 text-xs text-muted">
+        <h3 className="text-2xl text-foreground">
+          Shot {String(number ?? shot.order_index + 1).padStart(2, "0")}
+        </h3>
         {shot.state === "stale" && <StaleBadge />}
         <span className="ml-auto" role="status" aria-live="polite">
           {status === "saving" && "Saving…"}
@@ -78,33 +81,33 @@ export function ShotCard({
         />
       </div>
 
-      <label className="mb-2 block">
-        <span className="mb-1 block text-xs text-muted">
-          Image prompt — what the frame looks like
+      <label className="mb-3 block">
+        <span className="label">
+          Frame — what the still looks like
         </span>
         <textarea
           value={shot.image_prompt}
           onChange={(e) => edit("image_prompt", e.target.value)}
           rows={2}
-          className={FIELD}
+          className="input"
         />
       </label>
 
-      <label className="mb-2 block">
-        <span className="mb-1 block text-xs text-muted">
-          Motion prompt — what moves within it
+      <label className="mb-3 block">
+        <span className="label">
+          Motion — what moves within it
         </span>
         <textarea
           value={shot.motion_prompt}
           onChange={(e) => edit("motion_prompt", e.target.value)}
           rows={2}
-          className={FIELD}
+          className="input"
         />
       </label>
 
-      <div className="mb-2 grid grid-cols-3 gap-2">
+      <div className="mb-3 grid grid-cols-3 gap-3">
         <label>
-          <span className="mb-1 block text-xs text-muted">Seconds (max 5)</span>
+          <span className="label">Seconds · max 5</span>
           <input
             type="number"
             min="0.5"
@@ -115,15 +118,15 @@ export function ShotCard({
             // string, and a round trip through Number would turn 4.05 into
             // 4.050000000000001 and make the shot look edited.
             onChange={(e) => edit("duration_sec", e.target.value)}
-            className={FIELD}
+            className="input"
           />
         </label>
         <label>
-          <span className="mb-1 block text-xs text-muted">Camera</span>
+          <span className="label">Camera</span>
           <select
             value={shot.camera}
             onChange={(e) => edit("camera", e.target.value as Shot["camera"])}
-            className={FIELD}
+            className="input"
           >
             {CAMERA_ANGLES.map((angle) => (
               <option key={angle} value={angle}>
@@ -133,11 +136,11 @@ export function ShotCard({
           </select>
         </label>
         <label>
-          <span className="mb-1 block text-xs text-muted">Dialogue</span>
+          <span className="label">Spoken as</span>
           <select
             value={shot.dialogue_kind}
             onChange={(e) => edit("dialogue_kind", e.target.value as Shot["dialogue_kind"])}
-            className={FIELD}
+            className="input"
           >
             {DIALOGUE_KINDS.map((kind) => (
               <option key={kind} value={kind}>
@@ -150,15 +153,15 @@ export function ShotCard({
 
       {shot.dialogue_kind !== "none" && (
         <label className="block">
-          <span className="mb-1 block text-xs text-muted">Spoken over this shot</span>
+          <span className="label">Spoken over this shot</span>
           <textarea
             value={shot.speech_text}
             onChange={(e) => edit("speech_text", e.target.value)}
             rows={2}
-            className={FIELD}
+            className="input"
           />
         </label>
       )}
-    </li>
+    </div>
   );
 }

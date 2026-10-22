@@ -1,12 +1,9 @@
-import { redirect } from "next/navigation";
+"use client";
 
-/** The five stages are one scrolling page now.
- *
- *  Kept as a redirect rather than deleted: these URLs were the app's whole
- *  navigation for six milestones, so they are in browser histories and
- *  bookmarks, and a 404 is a worse answer than the section they asked for.
- */
-export default async function ScriptRedirect({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  redirect(`/meld/${id}#script`);
+import { ScriptStage } from "@/components/studio/ScriptStage";
+import { useReadyStudio } from "@/components/studio/StudioShell";
+
+export default function ScriptPage() {
+  const { studio, script } = useReadyStudio();
+  return <ScriptStage studio={studio} script={script} />;
 }

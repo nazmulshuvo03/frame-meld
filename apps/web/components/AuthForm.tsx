@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { BrandMark } from "@/components/studio/StudioHeader";
 import { ApiError, login, signup } from "@/lib/api";
 
 const COPY = {
@@ -57,30 +58,34 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center p-8">
-      <h1 className="mb-6 text-2xl font-semibold">{copy.heading}</h1>
+    <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col justify-center p-5">
+      <p className="mb-6 flex items-center gap-2.5 font-heading text-[19px] font-semibold">
+        <BrandMark />
+        FrameMeld
+      </p>
 
-      <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm">
-          Email
+      <form onSubmit={onSubmit} className="blueprint flex flex-col gap-4 p-6">
+        <h1 className="text-3xl">{copy.heading}</h1>
+        <label className="flex flex-col text-sm">
+          <span className="label">Email</span>
           <input
             type="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="rounded border border-strong px-3 py-2"
+            className="input"
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          Password
+        <label className="flex flex-col text-sm">
+          <span className="label">Password</span>
           <input
             type="password"
             required
             minLength={8}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="rounded border border-strong px-3 py-2"
+            className="input"
           />
         </label>
 
@@ -93,7 +98,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         <button
           type="submit"
           disabled={busy}
-          className="rounded bg-accent px-4 py-2 text-accent-foreground disabled:opacity-50"
+          className="btn btn-primary blueprint mt-1"
         >
           {busy ? "Working…" : copy.submit}
         </button>
@@ -101,7 +106,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
       <p className="mt-6 text-sm text-body">
         {copy.altText}{" "}
-        <Link href={copy.altHref} className="underline">
+        <Link href={copy.altHref} className="text-accent-ink underline underline-offset-3">
           {copy.altLabel}
         </Link>
       </p>

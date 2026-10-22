@@ -1,10 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { QuoteButton } from "@/components/QuoteButton";
-import { ShotMediaCard } from "@/components/ShotMediaCard";
+import { ShotMediaCard, speakable } from "@/components/ShotMediaCard";
 import { Empty, Notice, Stage } from "@/components/studio/Stage";
-import type { ShotsView } from "@/lib/api";
+import type { ShotMedia, ShotsView } from "@/lib/api";
 import type { Studio } from "@/lib/useStudio";
+
+const FILTERS: { id: string; label: string; keep: (shot: ShotMedia) => boolean }[] = [
+  { id: "all", label: "All", keep: () => true },
+  { id: "undrawn", label: "Not drawn", keep: (shot) => !shot.still?.asset_id },
+  { id: "silent", label: "No audio", keep: (shot) => speakable(shot) && !shot.audio?.asset_id },
+];
 
 export function ShotsStage({ studio, shots }: { studio: Studio; shots: ShotsView }) {
   const { busy, job, balance, quotes } = studio;
@@ -12,25 +19,50 @@ export function ShotsStage({ studio, shots }: { studio: Studio; shots: ShotsView
   const stillCredits = quotes.generate_shot_image;
   const speechCredits = quotes.generate_speech;
   const casting = busy && job?.kind === "map_shot_characters";
+  const [filter, setFilter] = useState(FILTERS[0]);
 
-  const undrawn = shots.shots.filter((shot) => !shot.still?.asset_id);
+  const undrawn = shots.shots.filter(FILTERS[1].keep);
+  const unvoiced = shots.shots.filter(FILTERS[2].keep);
 
   return (
     <Stage
       id="shots"
       title="Shots"
-      lede="One picture and one recording per shot. Each still is drawn from the sheets of whoever is in that shot, so the cast has to be settled first."
+      lede="Every shot drawn as a still and voiced. Each still is drawn from the sheets of whoever is in that shot, so the cast has to be settled first."
       summary={
         shots.shots.length > 0 ? (
-          <span className="font-mono tabular-nums">
+          <span>
             {shots.shots.length} {shots.shots.length === 1 ? "shot" : "shots"} ·{" "}
-            {shots.shots.length - undrawn.length} drawn
+            {shots.shots.length - undrawn.length} drawn ·{" "}
+            {shots.shots.filter(speakable).length - unvoiced.length} voiced
           </span>
         ) : null
       }
       action={
         shots.shots.length > 0 ? (
           <>
+            <fieldset className="seg">
+              <legend className="sr-only">Show</legend>
+              {FILTERS.map((option) => (
+                <label key={option.id} className="seg-opt">
+                  <input
+                    type="radio"
+                    name="shot-filter"
+                    checked={filter.id === option.id}
+                    onChange={() => setFilter(option)}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </fieldset>
+            <QuoteButton
+              credits={castingCredits}
+              balance={balance}
+              busy={busy}
+              busyLabel={casting && job?.state === "running" ? "Reading…" : "Queued…"}
+              label={shots.cast_into_shots ? "Cast them again" : "Cast the shots"}
+              onClick={studio.castTheShots}
+            />
             {undrawn.length > 0 && (
               <QuoteButton
                 credits={stillCredits * undrawn.length}
@@ -41,14 +73,16 @@ export function ShotsStage({ studio, shots }: { studio: Studio; shots: ShotsView
                 onClick={() => studio.drawStills(undrawn.map((shot) => shot.id))}
               />
             )}
-            <QuoteButton
-              credits={castingCredits}
-              balance={balance}
-              busy={busy}
-              busyLabel={casting && job?.state === "running" ? "Reading…" : "Queued…"}
-              label={shots.cast_into_shots ? "Cast them again" : "Cast the shots"}
-              onClick={studio.castTheShots}
-            />
+            {unvoiced.length > 0 && (
+              <QuoteButton
+                credits={speechCredits * unvoiced.length}
+                balance={balance}
+                busy={busy}
+                busyLabel="Recording…"
+                label={`Voice ${unvoiced.length} ${unvoiced.length === 1 ? "shot" : "shots"}`}
+                onClick={() => studio.recordSpeeches(unvoiced.map((shot) => shot.id))}
+              />
+            )}
           </>
         ) : null
       }
@@ -79,10 +113,10 @@ export function ShotsStage({ studio, shots }: { studio: Studio; shots: ShotsView
       }
     >
       {shots.shots.length === 0 ? (
-        <Empty>Write the script above, then come back to draw each shot.</Empty>
+        <Empty>Write the script first, then come back to draw each shot.</Empty>
       ) : (
-        <ol className="grid gap-6 sm:grid-cols-2">
-          {shots.shots.map((shot) => (
+        <ol className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-7">
+          {shots.shots.filter(filter.keep).map((shot) => (
             <ShotMediaCard
               key={shot.id}
               shot={shot}

@@ -336,6 +336,7 @@ export function useStudio(id: string) {
     drawStill: (shotId: string) => void start(() => generateStill(id, shotId)),
     recordSpeech: (shotId: string) => void start(() => generateSpeech(id, shotId)),
     drawStills: (ids: string[]) => startRun(ids, (shotId) => generateStill(id, shotId)),
+    recordSpeeches: (ids: string[]) => startRun(ids, (shotId) => generateSpeech(id, shotId)),
     animateShots: (ids: string[]) => startRun(ids, (shotId) => generateClip(id, shotId)),
     start,
     structural,

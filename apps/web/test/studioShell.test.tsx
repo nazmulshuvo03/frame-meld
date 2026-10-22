@@ -1,9 +1,12 @@
-import { Suspense } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const replace = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }));
+const pathname = vi.hoisted(() => ({ current: "/meld/meld-1/film" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace }),
+  usePathname: () => pathname.current,
+}));
 
 const api = vi.hoisted(() => ({
   getMeld: vi.fn(),
@@ -26,29 +29,27 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return { ...actual, ...api };
 });
 
-const { default: StudioPage } = await import("@/app/meld/[id]/page");
+const { StudioShell } = await import("@/components/studio/StudioShell");
+const { default: FilmPage } = await import("@/app/meld/[id]/film/page");
 
-/** Render the page and wait for its first load.
+/** Render the Film page inside the shell and wait for its first load.
  *
- *  The `act` wrapper is load-bearing, not decoration. The page reads its
- *  route params with React 19's `use()`, which suspends; inside Testing
- *  Library's synchronous act scope that promise never gets a chance to
- *  resolve and the tree stays on the fallback forever. Awaiting an async
- *  act is what lets the microtask queue drain.
- */
+ *  Pages only exist inside the shell, which owns the loading and the studio
+ *  state, so this is the unit under test rather than a page on its own. */
 async function mount() {
   await act(async () => {
     render(
-      <Suspense fallback={null}>
-        <StudioPage params={Promise.resolve({ id: "meld-1" })} />
-      </Suspense>,
+      <StudioShell id="meld-1">
+        <FilmPage />
+      </StudioShell>,
     );
   });
 }
 
-describe("StudioPage", () => {
+describe("StudioShell", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pathname.current = "/meld/meld-1/film";
     api.getMeld.mockResolvedValue({
       id: "meld-1",
       title: "The Lighthouse",
@@ -80,12 +81,48 @@ describe("StudioPage", () => {
     api.saveStory.mockResolvedValue({ text: "", content_hash: "h1" });
   });
 
-  it("puts all five stages on one page", async () => {
-    // The whole point of the rewrite: no navigation between stages.
+  it("gives each stage its own page and URL", async () => {
     await mount();
+    const nav = await screen.findByRole("navigation", { name: "Stages" });
     for (const stage of ["Story", "Script", "Cast", "Shots", "Film"]) {
-      expect(await screen.findByRole("heading", { name: stage, level: 2 })).toBeInTheDocument();
+      expect(within(nav).getByRole("link", { name: new RegExp(stage) })).toHaveAttribute(
+        "href",
+        `/meld/meld-1/${stage.toLowerCase()}`,
+      );
     }
+    // Only the page for the current URL is on screen.
+    expect(screen.getByRole("heading", { name: "Film", level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Script", level: 2 })).not.toBeInTheDocument();
+  });
+
+  it("marks the stage the URL is on as current", async () => {
+    await mount();
+    const nav = await screen.findByRole("navigation", { name: "Stages" });
+    expect(within(nav).getByRole("link", { name: /Film/ })).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    expect(within(nav).getByRole("link", { name: /Cast/ })).not.toHaveAttribute("aria-current");
+  });
+
+  it("offers Back and Next to the neighbouring stages", async () => {
+    pathname.current = "/meld/meld-1/cast";
+    await mount();
+    expect(await screen.findByRole("link", { name: /Next: Shots/ })).toHaveAttribute(
+      "href",
+      "/meld/meld-1/shots",
+    );
+    expect(screen.getByRole("link", { name: /Back to Script/ })).toHaveAttribute(
+      "href",
+      "/meld/meld-1/script",
+    );
+  });
+
+  it("has no Next on the last stage and no Back on the first", async () => {
+    await mount();
+    await screen.findByRole("navigation", { name: "Stages" });
+    expect(screen.queryByRole("link", { name: /Next:/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Back to Shots/ })).toBeInTheDocument();
   });
 
   it("shows the film's length and the balance in the transport bar", async () => {

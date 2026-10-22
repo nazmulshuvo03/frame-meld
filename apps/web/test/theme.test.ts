@@ -10,13 +10,10 @@ import { describe, expect, it } from "vitest";
  */
 const css = readFileSync(path.join(import.meta.dirname, "..", "app", "globals.css"), "utf8");
 
-/** The `:root` block outside any media query, and the one inside the
- *  dark-scheme query. Crude on purpose: the file is ours, it has exactly two
- *  such blocks, and a parser would be more machinery than the thing parsed. */
-function tokens(theme: "light" | "dark"): Record<string, string> {
-  const darkAt = css.indexOf("@media (prefers-color-scheme: dark)");
-  const region = theme === "light" ? css.slice(0, darkAt) : css.slice(darkAt);
-  const block = region.slice(region.indexOf(":root"), region.indexOf("}", region.indexOf(":root")));
+/** The `:root` block. Crude on purpose: the file is ours, it has exactly one
+ *  such block, and a parser would be more machinery than the thing parsed. */
+function tokens(): Record<string, string> {
+  const block = css.slice(css.indexOf(":root"), css.indexOf("}", css.indexOf(":root")));
   return Object.fromEntries(
     [...block.matchAll(/--([\w-]+):\s*(#[0-9a-f]{3,8})/gi)].map((m) => [m[1], m[2]]),
   );
@@ -68,12 +65,12 @@ const EDGE_PAIRS: [string, string, string][] = [
   ["faint", "background", "placeholder text"],
 ];
 
-describe.each(["light", "dark"] as const)("the %s theme", (theme) => {
-  const palette = tokens(theme);
+describe("the theme", () => {
+  const palette = tokens();
 
-  it("defines every token the other theme defines", () => {
-    const other = tokens(theme === "light" ? "dark" : "light");
-    expect(Object.keys(palette).sort()).toEqual(Object.keys(other).sort());
+  it("is one light theme that ignores the OS dark setting", () => {
+    expect(css).not.toContain("prefers-color-scheme: dark");
+    expect(css).toContain("color-scheme: light");
   });
 
   it.each(TEXT_PAIRS)("reads %s on %s (%s)", (fg, bg) => {
@@ -91,12 +88,17 @@ describe.each(["light", "dark"] as const)("the %s theme", (theme) => {
     expect(contrast(palette[fg], palette[bg])).toBeGreaterThanOrEqual(1.2);
   });
 
-  it("puts the panel and the page on the same side of the theme", () => {
-    // A light panel on a dark page is the exact bug this file exists for:
-    // every token inside the panel is chosen for the page's polarity.
-    const flipped =
-      luminance(palette.panel) > 0.5 !== luminance(palette.background) > 0.5;
-    expect(flipped).toBe(false);
+  it("keeps the page a light, neutral grey ground", () => {
+    // The prototype's technical ground: light, and neither warm nor cool.
+    // Bounds on the blue channel against red catch a drift into a tint.
+    const [r, , b] = [1, 3, 5].map((i) => parseInt(palette.background.slice(i, i + 2), 16));
+    expect(luminance(palette.background)).toBeGreaterThan(0.85);
+    expect(Math.abs(r - b)).toBeLessThanOrEqual(6);
+  });
+
+  it("holds paragraph-size accent text and the current stage's tint to AA", () => {
+    expect(contrast(palette["accent-ink"], palette.background)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(palette.foreground, palette["accent-tint"])).toBeGreaterThanOrEqual(4.5);
   });
 });
 

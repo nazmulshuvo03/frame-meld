@@ -1,93 +1,65 @@
 @import "tailwindcss";
 
-/* A small semantic palette, defined once and flipped by the OS theme.
+/* A small semantic palette, defined once.
  *
- * Every page used to reach for `text-neutral-500` / `bg-neutral-50` /
- * `border-neutral-200` directly, which is fine on white and renders
- * dark-on-dark the moment the body goes to #0a0a0a. The alternative to this
- * file was a `dark:` variant on roughly 150 class usages — five times the
- * diff, and five times the places for one of them to be forgotten.
+ * Components name what a colour *means* (muted, panel, signal) and never how
+ * it looks, so re-skinning the app is this one block.
  *
- * Nine tokens, each named for what it *means* rather than how dark it is, so
- * a component never has to know which theme it is in.
+ * The skin is the "Industry" wireframe from the prototype: a light technical
+ * grey ground, ink text, and one steel-blue accent. There is no second hue --
+ * "out of date" and "working" are both steel, as in the prototype; only an
+ * error is red. One theme, on purpose: `color-scheme: light` keeps native
+ * controls (scrollbars, selects, date pickers) on the same ground.
  */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+
+  --background: #f2f2f3;
+  --foreground: #1d1f20;
 
   /* Body copy that is not the primary text: captions, counts, hints. */
-  --muted: #737373;
-  /* Quieter still — timestamps, disabled affordances. */
-  --faint: #a3a3a3;
+  --muted: #5d5d60;
+  /* Quieter still -- timestamps, disabled affordances, placeholders. */
+  --faint: #7a7a7d;
   /* Secondary paragraphs that must stay comfortably readable. */
-  --body: #525252;
+  --body: #424244;
 
-  /* A card or section edge. Decorative: it groups content that is already
-   * grouped by position, so it is held to being perceptible rather than to
-   * WCAG 1.4.11's 3:1, which governs UI components you have to find. */
-  --subtle: #e5e5e5;
-  /* An input's border, which *is* a UI component's only boundary here, so
-   * it meets 3:1 (3.03 on white) rather than looking tasteful at 1.5. */
-  --strong: #949494;
-  /* And its focus indicator, held higher again so the change is obvious. */
-  --edge-focus: #767676;
-  /* Panels sitting on the page background. */
-  --panel: #fafafa;
+  /* A hairline: card, section and table edges. Decorative, so it only has
+   * to be perceptible. */
+  --subtle: #d0d0d1;
+  /* An edge that *is* a control's only boundary: WCAG 1.4.11's 3:1. */
+  --strong: #7a7a7d;
+  /* A focused control's edge and the focus ring. */
+  --edge-focus: #4b7197;
+  /* The writing sheet: a touch lighter than the ground, as paper is. */
+  --sheet: #f5f5f8;
+  /* Inputs and tinted wells sitting on the ground. */
+  --panel: #e9e9ea;
 
-  /* Primary buttons. Inverted against the page, so it flips with it. */
-  --accent: #171717;
-  --accent-foreground: #ffffff;
+  /* The steel accent. The prototype's #5980a6 is a step too light to carry
+   * a button label at 4.5:1, so the fill sits one notch deeper. */
+  --accent: #4b7197;
+  --accent-foreground: #f2f2f3;
+  /* Accent-tinted fills: the current stage, hovers, timeline segments. */
+  --accent-tint: #eef6ff;
+  --accent-wash: #d6ebff;
+  /* Paragraph-size text in the accent (kickers, labels). */
+  --accent-ink: #416180;
 
-  /* "Out of date", and every other thing-you-should-look-at. */
-  --warn: #fffbeb;
-  --warn-border: #fde68a;
-  --warn-foreground: #78350f;
+  /* "Out of date", and every other thing-you-should-look-at. Steel, as the
+   * prototype draws its "Out of date" tag. */
+  --warn: #eef6ff;
+  --warn-border: #5980a6;
+  --warn-foreground: #2c455d;
 
-  --danger: #dc2626;
+  --danger: #b42318;
 
-  /* Work in progress, and the only colour on the page that moves.
-   *
-   * Cold on purpose. Amber already means "out of date" here, and a second
-   * warm accent would make "this is running" and "this is wrong" read as
-   * the same kind of event. This is the green of a waveform monitor, which
-   * is what the transport bar is imitating. */
-  --signal: #0d7d76;
-  --signal-faint: #d3efec;
-}
+  /* Work in progress. */
+  --signal: #4b7197;
+  --signal-faint: #d6ebff;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-
-    --muted: #a3a3a3;
-    --faint: #737373;
-    --body: #d4d4d4;
-
-    --subtle: #262626;
-    /* 3.01 and 4.55 on #0a0a0a — the same two rules as above. */
-    --strong: #5d5d5d;
-    --edge-focus: #797979;
-    --panel: #171717;
-
-    /* Inverted again: a near-black button on a near-black page is a button
-     * nobody can see. */
-    --accent: #ededed;
-    --accent-foreground: #0a0a0a;
-
-    /* Amber at a dark-mode weight: a wash rather than a highlighter, with
-     * the text light enough to read on it. */
-    --warn: #291a06;
-    --warn-border: #5c3d0a;
-    --warn-foreground: #fcd34d;
-
-    --danger: #f87171;
-
-    /* Lifted well off the dark background: on #0a0a0a the light version is
-     * a smudge, and this is the one element a user watches for a minute. */
-    --signal: #2ec4b6;
-    --signal-faint: #0d2b29;
-  }
+  /* The "+" registration marks on a blueprint frame. */
+  --mark: #7d7e7f;
 }
 
 @theme inline {
@@ -100,71 +72,288 @@
   --color-strong: var(--strong);
   --color-edge-focus: var(--edge-focus);
   --color-panel: var(--panel);
+  --color-sheet: var(--sheet);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-wash: var(--accent-wash);
+  --color-accent-ink: var(--accent-ink);
   --color-warn: var(--warn);
   --color-warn-border: var(--warn-border);
   --color-warn-foreground: var(--warn-foreground);
   --color-danger: var(--danger);
   --color-signal: var(--signal);
   --color-signal-faint: var(--signal-faint);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-barlow), system-ui, sans-serif;
+  --font-heading: var(--font-barlow-condensed), system-ui, sans-serif;
+
+  /* Square corners everywhere: the wireframe is drawn, not moulded.
+   * `rounded-full` is left alone for the few things that really are round. */
+  --radius: 0px;
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  /* Geist, which layout.tsx has been loading since M1 and which this line
-   * used to throw away by naming Arial. */
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
-}
+@layer base {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-barlow), system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+  }
 
-/* Anchored scrolling for the five stages: the transport bar is sticky, so
- * a stage scrolled to the top of the viewport would sit underneath it. */
-html {
-  scroll-behavior: smooth;
-}
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-barlow-condensed), system-ui, sans-serif;
+    font-weight: 600;
+    line-height: 1.12;
+    letter-spacing: -0.015em;
+  }
 
-@media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
+  :focus-visible {
+    outline: 2px solid var(--edge-focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+
+  /* Tailwind v4 dropped the preflight rule that gave buttons a pointer
+   * cursor. Set once here rather than as a class on each of them;
+   * `:disabled` keeps the arrow, since a disabled control is exactly the one
+   * that is not clickable. */
+  button:not(:disabled),
+  summary,
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  /* Form controls do not inherit the page's colours on their own. */
+  input,
+  textarea,
+  select {
+    background-color: transparent;
+    color: inherit;
+  }
+
+  /* A native select's dropdown is painted by the OS from these two, so its
+   * options need a real background rather than `transparent`. */
+  select {
+    background-color: var(--background);
+  }
+
+  ::placeholder {
+    color: var(--faint);
   }
 }
 
-/* Tailwind v4 dropped the preflight rule that gave buttons a pointer
- * cursor, so every button in the app has been showing the default arrow —
- * the one thing that tells a mouse user a thing is clickable before they
- * click it. Set once here rather than as a `cursor-pointer` class on each
- * of them, which is the same argument as the palette above: one rule or a
- * hundred places to forget it. `:disabled` keeps the arrow, since a
- * disabled control is exactly the one that is not clickable. */
-button:not(:disabled),
-summary,
-[role="button"]:not([aria-disabled="true"]) {
-  cursor: pointer;
+@layer components {
+  /* A blueprint frame: square, hairline-bordered, with a "+" registration
+   * mark on each corner. The four marks are one pseudo-element of eight
+   * one-pixel gradients, so a framed element needs no extra markup. */
+  .blueprint {
+    position: relative;
+    border: 1px solid var(--subtle);
+  }
+  .blueprint::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    pointer-events: none;
+    --l: linear-gradient(var(--mark), var(--mark));
+    background:
+      var(--l) 5px 0 / 1px 11px no-repeat,
+      var(--l) 0 5px / 11px 1px no-repeat,
+      var(--l) calc(100% - 5px) 0 / 1px 11px no-repeat,
+      var(--l) 100% 5px / 11px 1px no-repeat,
+      var(--l) 5px 100% / 1px 11px no-repeat,
+      var(--l) 0 calc(100% - 5px) / 11px 1px no-repeat,
+      var(--l) calc(100% - 5px) 100% / 1px 11px no-repeat,
+      var(--l) 100% calc(100% - 5px) / 11px 1px no-repeat;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-family: var(--font-barlow-condensed), system-ui, sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    line-height: 1.2;
+    color: var(--foreground);
+    background: transparent;
+    border: 1px solid var(--subtle);
+    padding: 7px 12px;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .btn:not(:disabled):hover {
+    background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  }
+  .btn:not(:disabled):active {
+    background: color-mix(in srgb, var(--foreground) 14%, transparent);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-foreground);
+  }
+  .btn-primary:not(:disabled):hover {
+    background: var(--accent-ink);
+  }
+  .btn-primary:not(:disabled):active {
+    background: var(--warn-foreground);
+  }
+  .btn-ghost {
+    border-color: transparent;
+  }
+  /* A button that is one cell of a row ruled into its card's edge. */
+  .btn-flush {
+    border: 0;
+    padding: 10px;
+    width: 100%;
+    white-space: normal;
+  }
+  .btn-flush:not(:disabled):hover {
+    background: var(--accent-tint);
+  }
+
+  .input {
+    width: 100%;
+    min-height: 36px;
+    padding: 6px 10px;
+    font-size: 14px;
+    background: var(--panel);
+    /* --strong, not the prototype's hairline: an input's edge is its only
+     * boundary, so it is held to WCAG 1.4.11's 3:1. */
+    border: 1px solid var(--strong);
+    caret-color: var(--accent);
+  }
+  .input:hover {
+    border-color: var(--body);
+  }
+  .input:focus-visible {
+    border-color: var(--edge-focus);
+    outline-offset: 0;
+  }
+  select.input {
+    background-color: var(--panel);
+  }
+
+  /* A label above a field, and the small uppercase kicker over a heading. */
+  .label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .kicker {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    padding: 3px 10px;
+    background: var(--panel);
+    color: var(--body);
+  }
+
+  /* A segmented control on native radios. */
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--subtle);
+  }
+  .seg-opt {
+    display: inline-flex;
+    align-items: center;
+    padding: 7px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .seg-opt + .seg-opt {
+    border-left: 1px solid var(--subtle);
+  }
+  .seg-opt input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+  .seg-opt:has(input:checked) {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+  .seg-opt:not(:has(input:checked)):hover {
+    background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  }
+  .seg-opt:has(input:focus-visible) {
+    outline: 2px solid var(--edge-focus);
+    outline-offset: -2px;
+  }
+
+  /* An empty frame: the drafting convention for "picture goes here". */
+  .no-frame {
+    background-color: var(--panel);
+    background-image:
+      linear-gradient(to top right, transparent calc(50% - 0.5px), var(--subtle) 50%, transparent calc(50% + 0.5px)),
+      linear-gradient(to top left, transparent calc(50% - 0.5px), var(--subtle) 50%, transparent calc(50% + 0.5px));
+  }
 }
 
-/* Form controls do not inherit the page's colours on their own, and a
- * textarea left alone renders white-on-white in dark mode with a caret
- * nobody can find. Set here rather than per component: the autosaving story
- * editor, every inline field on the Script and Cast pages and the login form
- * all need exactly this, and none of them should have to remember it.
- */
-input,
-textarea,
-select {
-  background-color: transparent;
-  color: inherit;
+/* Moving between stages slides the new page in from the side it lives on:
+ * from the right going forward, from the left going back. */
+@keyframes slide-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(2rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-/* A native select's dropdown is painted by the OS from these two, not from
- * the page, so its options stay unreadable unless they are given a real
- * background rather than `transparent`. */
-select {
-  background-color: var(--background);
+@keyframes slide-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-2rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-::placeholder {
-  color: var(--faint);
+.slide-next {
+  animation: slide-from-right 280ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.slide-back {
+  animation: slide-from-left 280ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-next,
+  .slide-back {
+    animation: none;
+  }
 }

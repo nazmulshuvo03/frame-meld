@@ -31,7 +31,7 @@ export function RowControls({
   confirmMessage: string;
   busy?: boolean;
 }) {
-  const button = "rounded border border-subtle px-2 py-1 text-xs disabled:opacity-40";
+  const button = "btn h-8 min-w-8 px-2 py-0 text-[13px]";
 
   return (
     <div className="flex shrink-0 items-center gap-1">

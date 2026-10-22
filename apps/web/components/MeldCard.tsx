@@ -48,8 +48,8 @@ export function MeldCard({
   const current = STAGES[reached] ?? null;
 
   return (
-    <li className="relative flex flex-col rounded-lg border border-subtle bg-panel transition-colors hover:border-strong">
-      <div className="flex-1 p-5">
+    <li className="blueprint flex flex-col transition-colors hover:border-accent">
+      <div className="flex-1 p-4">
         {editing ? (
           <input
             autoFocus
@@ -64,7 +64,7 @@ export function MeldCard({
                 setEditing(false);
               }
             }}
-            className="w-full rounded border border-strong px-2 py-1 text-lg font-medium focus:border-edge-focus focus:outline-none"
+            className="input font-heading text-xl font-semibold"
           />
         ) : (
           // The whole card face is the target, not just the words: a list of
@@ -73,7 +73,7 @@ export function MeldCard({
           <Link
             href={`/meld/${meld.id}`}
             className={
-              "block truncate text-lg font-medium after:absolute after:inset-0 after:content-['']" +
+              "block truncate font-heading text-xl font-semibold after:absolute after:inset-0 after:content-['']" +
               " focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-edge-focus"
             }
           >
@@ -84,13 +84,11 @@ export function MeldCard({
         {/* The five stages as the transport bar draws them, so the card and
             the studio agree about what a filled dot means. Filled up to the
             stage this Meld has reached, hollow after it. */}
-        <div className="mt-4 flex items-center gap-1.5" aria-hidden>
+        <div className="mt-3 flex items-center gap-1" aria-hidden>
           {STAGES.map((stage, index) => (
             <span
               key={stage.id}
-              className={`h-1 flex-1 rounded-full ${
-                index <= reached ? "bg-signal" : "bg-subtle ring-1 ring-strong/40"
-              }`}
+              className={`h-[3px] flex-1 ${index <= reached ? "bg-signal" : "bg-subtle"}`}
             />
           ))}
         </div>
@@ -100,8 +98,8 @@ export function MeldCard({
           <span className="text-faint" aria-hidden>
             ·
           </span>
-          <span className="font-mono tabular-nums text-faint">{meld.aspect_ratio}</span>
-          <span className="ml-auto font-mono tabular-nums text-faint">
+          <span className="tabular-nums text-faint">{meld.aspect_ratio}</span>
+          <span className="ml-auto tabular-nums text-faint">
             {new Date(meld.updated_at).toLocaleDateString()}
           </span>
         </p>
@@ -114,7 +112,7 @@ export function MeldCard({
           screen. Delete stays quiet until it is pointed at; permanent red
           gives a destructive action the loudest colour on a page where
           nothing is wrong. */}
-      <div className="relative z-10 flex gap-4 border-t border-subtle px-5 py-2.5 text-xs">
+      <div className="relative z-10 flex gap-4 border-t border-subtle px-4 py-2.5 text-xs">
         <button
           onClick={() => {
             // Reset the draft before opening. Without this, a rename that

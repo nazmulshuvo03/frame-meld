@@ -30,7 +30,7 @@ export function CancelButton({
       <button
         type="button"
         onClick={onCancel}
-        className="rounded border border-subtle px-3 py-2 text-sm text-muted hover:bg-panel"
+        className="btn"
       >
         Stop
       </button>

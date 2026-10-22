@@ -8,6 +8,7 @@ export function QuoteButton({
   label,
   onClick,
   disabled = false,
+  flush = false,
 }: {
   credits: number;
   balance: number | null;
@@ -20,6 +21,9 @@ export function QuoteButton({
    *  button that says "Queued…" when nothing is queued is a lie about
    *  what the app is doing, and the user cannot tell what to fix. */
   disabled?: boolean;
+  /** One cell of a row ruled into a card's bottom edge, rather than a
+   *  free-standing button. */
+  flush?: boolean;
 }) {
   // Unknown balance is not the same as an insufficient one: the balance
   // request may simply not have landed yet, and disabling the button on a
@@ -27,16 +31,16 @@ export function QuoteButton({
   const affordable = balance === null || balance >= credits;
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className={`flex flex-col gap-1 ${flush ? "items-stretch" : "items-end"}`}>
       <button
         onClick={onClick}
         disabled={busy || disabled || !affordable}
-        className="rounded bg-accent px-4 py-2 text-sm text-accent-foreground disabled:opacity-50"
+        className={flush ? "btn btn-flush" : "btn"}
       >
         {busy ? busyLabel : `${label} · ${credits} credits`}
       </button>
       {!affordable && (
-        <span role="alert" className="text-xs text-danger">
+        <span role="alert" className={`text-xs text-danger ${flush ? "px-2.5 pb-2" : ""}`}>
           You need {credits - (balance ?? 0)} more credits.
         </span>
       )}
